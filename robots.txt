@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://mike000123.github.io/cooling_systems/sitemap.xml
