@@ -6130,7 +6130,7 @@ function buildPartners() {
     el('h2', { class: 'sec' }, 'Το κοινό'),
     el('div', { class: 'stats' },
       el('div', { class: 'stat' }, el('b', {}, String(SIMS.length)), el('span', {}, 'διαδραστικές προσομοιώσεις')),
-      el('div', { class: 'stat' }, el('b', {}, '[—]'), el('span', {}, 'επισκέπτες τον μήνα')),
+      el('div', { class: 'stat' }, el('b', { id: 'stat-visitors' }, '—'), el('span', {}, 'επισκέπτες τις τελευταίες 30 ημέρες')),
       el('div', { class: 'stat' }, el('b', {}, '[—]'), el('span', {}, 'σχολές / τάξεις που το χρησιμοποιούν')),
       el('div', { class: 'stat' }, el('b', {}, 'EL'), el('span', {}, 'Κύπρος & Ελλάδα'))),
     el('h2', { class: 'sec' }, 'Τρόποι υποστήριξης'),
@@ -6301,10 +6301,18 @@ function buildCatbar() {
 }
 function markCatbar() { const cid = App.sim ? App.sim.cat : null; for (const [id, b] of Object.entries(CatBar.btns)) b.classList.toggle('on', id === cid); }
 
+/* Επισκέπτες 30 ημερών από τον δημόσιο μετρητή του GoatCounter (μόνο στην έκδοση GitHub, όπου υπάρχει το script).
+   Χρειάζεται στο GoatCounter: Settings → «Allow adding visitor counts on your website». Οι τιμές ανανεώνονται ανά ~4 ώρες. */
+function loadVisitorStat() {
+  const sc = document.querySelector('script[data-goatcounter]'), out = document.getElementById('stat-visitors');
+  if (!sc || !out || !window.fetch) return;
+  const url = sc.getAttribute('data-goatcounter').replace(/\/count$/, '/counter/TOTAL.json?start=month');
+  fetch(url).then(r => r.ok ? r.json() : null).then(j => { if (j && j.count) out.textContent = String(j.count).replace(/,/g, '.'); }).catch(() => {});
+}
 function initShell() {
   for (const id of ['brand-name', 'foot-name']) document.getElementById(id).textContent = SITE.name;
   document.getElementById('brand-tag').textContent = SITE.tagline;
-  buildHome(); buildPartners(); buildCatbar();
+  buildHome(); buildPartners(); buildCatbar(); loadVisitorStat();
   document.getElementById('demo-banner').hidden = !SITE.demoUnlock;
   document.getElementById('btn-pause').addEventListener('click', () => setPaused(!App.paused));
   document.getElementById('btn-step').addEventListener('click', () => { if (App.scene) for (let i = 0; i < 6; i++) App.scene.step(1 / 60); });
