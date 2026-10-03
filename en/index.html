@@ -788,10 +788,21 @@ const VIDEOS = [
   { id: 'Wc4WnB4gnKw', short: true, t: 'The refrigeration cycle when conditions change', sims: [['cycle', '']] },
   { id: '1ZDGOIFFYMs', short: true, t: 'Same AC, three faults', sims: [['diag', '']] },
   { id: 'Y9_XdSJxVPY', short: true, t: 'Cylinder pressure ≠ charge', sims: [['sat', '']] },
-  { id: 'PqRiRThF9VQ', short: true, t: 'Water stuck at 100 °C — latent heat', sims: [['heatcurve', '']] }
+  { id: 'PqRiRThF9VQ', short: true, t: 'Water stuck at 100 °C — latent heat', sims: [['heatcurve', '']] },
+  { id: 'j6QomsjLfto', short: true, t: 'Low suction pressure ≠ leak', sims: [['diag', '']] },
+  { id: '3-UXrWoF16Q', short: true, t: 'Why your AC drips more on humid days', sims: [['psy', 'coil']] },
+  { id: 'EVlmvohAI1c', short: true, t: 'F-gas leak checks: how often?', sims: [['fgas', 'co2e']] },
+  { id: 'mROqJ-aoABw', short: true, t: '500 microns is not enough: the decay test', sims: [['fgas', 'vac']] },
+  { id: '5oaxTlKjS0k', short: true, t: 'Recovery: the standing pressure check', sims: [['recov', '']] },
+  { id: 'kDGhewqqVLU', short: true, t: 'How a pressure gauge shows temperature', sims: [['sat', '']] },
+  { id: 'P2e00q_rar4', short: true, t: 'Find C, S and R on unlabelled terminals', sims: [['comp', 'wind']] },
+  { id: 'wHoKB1z3AVc', short: true, t: 'Counterflow vs parallel flow: more heat', sims: [['hx', 'main']] },
+  { id: '2RVuhsoefIU', short: true, t: 'Why insulated suction lines still sweat', sims: [['pipeins', '']] },
+  { id: 'IAgmVbv8aUs', short: true, t: 'Can an AC beat the Carnot limit?', sims: [['law2', 'fridge'], ['law2', 'engine']] },
+  { id: 'OIb-_OolAxk', short: true, t: 'Bernoulli: faster water, lower pressure', sims: [['bern', '']] }
 ];
 /* μικρογραφίες: images/yt/<id>.jpg (480×270 / 270×480) — το build.py τις βάζει μέσα στη σελίδα (artifact) ή ως αρχεία (GitHub) */
-const VIDEO_THUMBS = {"0aFhV2xDA3k": "/images/yt/0aFhV2xDA3k.jpg", "1ZDGOIFFYMs": "/images/yt/1ZDGOIFFYMs.jpg", "AlrHpVYqERk": "/images/yt/AlrHpVYqERk.jpg", "EWs2n7YKkG4": "/images/yt/EWs2n7YKkG4.jpg", "PqRiRThF9VQ": "/images/yt/PqRiRThF9VQ.jpg", "QW_I0gwpu-M": "/images/yt/QW_I0gwpu-M.jpg", "QXHTHPkxeO4": "/images/yt/QXHTHPkxeO4.jpg", "VX8PuGds59E": "/images/yt/VX8PuGds59E.jpg", "Wc4WnB4gnKw": "/images/yt/Wc4WnB4gnKw.jpg", "XflHH6cNckE": "/images/yt/XflHH6cNckE.jpg", "Y9_XdSJxVPY": "/images/yt/Y9_XdSJxVPY.jpg", "bm6b9br3o_k": "/images/yt/bm6b9br3o_k.jpg", "dynQfN2y6Q0": "/images/yt/dynQfN2y6Q0.jpg", "eOx_KoBplFw": "/images/yt/eOx_KoBplFw.jpg", "eVa67wAR3KY": "/images/yt/eVa67wAR3KY.jpg", "quAk0qP4lG0": "/images/yt/quAk0qP4lG0.jpg", "vwdcFimzCy0": "/images/yt/vwdcFimzCy0.jpg", "zGZuD0Enk5Q": "/images/yt/zGZuD0Enk5Q.jpg"};
+const VIDEO_THUMBS = {"0aFhV2xDA3k": "/images/yt/0aFhV2xDA3k.jpg", "1ZDGOIFFYMs": "/images/yt/1ZDGOIFFYMs.jpg", "2RVuhsoefIU": "/images/yt/2RVuhsoefIU.jpg", "3-UXrWoF16Q": "/images/yt/3-UXrWoF16Q.jpg", "5oaxTlKjS0k": "/images/yt/5oaxTlKjS0k.jpg", "AlrHpVYqERk": "/images/yt/AlrHpVYqERk.jpg", "EVlmvohAI1c": "/images/yt/EVlmvohAI1c.jpg", "EWs2n7YKkG4": "/images/yt/EWs2n7YKkG4.jpg", "IAgmVbv8aUs": "/images/yt/IAgmVbv8aUs.jpg", "OIb-_OolAxk": "/images/yt/OIb-_OolAxk.jpg", "P2e00q_rar4": "/images/yt/P2e00q_rar4.jpg", "PqRiRThF9VQ": "/images/yt/PqRiRThF9VQ.jpg", "QW_I0gwpu-M": "/images/yt/QW_I0gwpu-M.jpg", "QXHTHPkxeO4": "/images/yt/QXHTHPkxeO4.jpg", "VX8PuGds59E": "/images/yt/VX8PuGds59E.jpg", "Wc4WnB4gnKw": "/images/yt/Wc4WnB4gnKw.jpg", "XflHH6cNckE": "/images/yt/XflHH6cNckE.jpg", "Y9_XdSJxVPY": "/images/yt/Y9_XdSJxVPY.jpg", "bm6b9br3o_k": "/images/yt/bm6b9br3o_k.jpg", "dynQfN2y6Q0": "/images/yt/dynQfN2y6Q0.jpg", "eOx_KoBplFw": "/images/yt/eOx_KoBplFw.jpg", "eVa67wAR3KY": "/images/yt/eVa67wAR3KY.jpg", "j6QomsjLfto": "/images/yt/j6QomsjLfto.jpg", "kDGhewqqVLU": "/images/yt/kDGhewqqVLU.jpg", "mROqJ-aoABw": "/images/yt/mROqJ-aoABw.jpg", "quAk0qP4lG0": "/images/yt/quAk0qP4lG0.jpg", "vwdcFimzCy0": "/images/yt/vwdcFimzCy0.jpg", "wHoKB1z3AVc": "/images/yt/wHoKB1z3AVc.jpg", "zGZuD0Enk5Q": "/images/yt/zGZuD0Enk5Q.jpg"};
 
 /* ================= δύο εκδόσεις =================
    • Βασική έκδοση (index.html) — για σπουδαστές: γενικά μοντέλα + προϊόντα χορηγών (status: 'live').
