@@ -128,3 +128,17 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 .hero ul{padding-left:20px;margin:.6em 0}
 .hero li{margin:.25em 0}
 .empty{padding:22px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px;background:var(--soft)}
+
+/* μπάρα όπως στο κεντρικό site */
+.nav{align-items:center}
+.nav a.nav-acad{background:var(--orange);color:#fff;opacity:1}
+.nav a.nav-acad:hover{background:#C9561F;color:#fff}
+.nav a.nav-acad.on{box-shadow:inset 0 -2px 0 #8E3510}
+#nav{display:inline-flex;gap:4px;align-items:center}
+#nav:empty{display:none}
+.nav a.me{display:inline-flex;align-items:center;gap:6px;border:1px solid #B5CADA;background:rgba(255,255,255,.6)}
+.nav .social{display:inline-flex;align-items:center;gap:2px;margin-left:4px}
+.nav a.soc{display:inline-flex;align-items:center;justify-content:center;padding:6px 7px;opacity:.95}
+.nav a.soc svg{display:block}
+@media (max-width:560px){.topbar-in{position:relative}.topbar-in .brand{padding-inline-end:84px}.nav{gap:2px}.nav a{padding:6px 8px;font-size:13px}
+ .nav .social{position:absolute;top:12px;right:0;margin:0;background:rgba(255,255,255,.75);border-radius:999px;padding:1px 3px}}
