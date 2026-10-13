@@ -108,7 +108,7 @@ function quizHTML(src) {
     <div class="expl" hidden>${esc(x.expl)}</div></div>`).join('')}
     <div class="row" style="margin-top:10px"><button class="btn primary" data-act="check">Έλεγχος απαντήσεων</button><span class="muted" data-score></span></div></div>`;
 }
-function bindQuiz(root, src) {
+function bindQuiz(root, src, onScore) {
   const qs = parseQuiz(src); const btn = $('[data-act=check]', root); if (!btn) return;
   btn.onclick = () => {
     let score = 0;
@@ -119,6 +119,7 @@ function bindQuiz(root, src) {
       const ex = $('.expl', el); ex.hidden = !qs[i].expl;
     });
     $('[data-score]', root).textContent = `Σωστές: ${score} από ${qs.length}`;
+    if (onScore) onScore(score, qs.length);
   };
 }
 
@@ -152,6 +153,13 @@ const routes = [];
 const route = (re, fn) => routes.push([re, fn]);
 let navToken = 0;
 function go(h) { if (location.hash === h) render(); else location.hash = h; }
+function bindPreview() {
+  const on = $('#prev-on'), ex = $('#prev-exit'), rs = $('#prev-reset');
+  const cid = (location.hash.match(/#\/c\/([\w-]{36})/) || [])[1];
+  if (on) on.onclick = () => { try { sessionStorage.setItem(PREVIEW_KEY, cid); } catch {} go('#/c/' + cid); };
+  if (ex) ex.onclick = () => { try { sessionStorage.removeItem(PREVIEW_KEY); } catch {} render(); };
+  if (rs) rs.onclick = async () => { try { await q(sb.from('lesson_progress').delete().eq('class_id', cid).eq('user_id', me.id)); toast('Η πρόοδός σας μηδενίστηκε.'); render(); } catch (er) { toast(errText(er), true); } };
+}
 async function render() {
   const tok = ++navToken;
   const h = location.hash.replace(/^#/, '') || '/';
@@ -162,7 +170,7 @@ async function render() {
     const m = h.match(re);
     if (m) {
       if (session && me) refreshUnread().catch(() => {});
-      try { await fn(...m.slice(1).map(x => x && decodeURIComponent(x)), tok); }
+      try { await fn(...m.slice(1).map(x => x && decodeURIComponent(x)), tok); bindPreview(); }
       catch (e) { console.error(e); if (tok === navToken) app.innerHTML = msgBox('err', esc(errText(e))) + `<p><a href="#/">← Αρχική</a></p>`; }
       window.scrollTo(0, 0);
       return;
@@ -332,12 +340,14 @@ route(/^\/profile$/, async () => {
   };
   $('#exp').onclick = async () => {
     try {
-      const [profile, enrollments, submissions, messages] = await Promise.all([
+      const [profile, enrollments, submissions, messages, progress, activity] = await Promise.all([
         q(sb.from('profiles').select('*').eq('id', me.id).single()),
         q(sb.from('enrollments').select('joined_at, classes(name)').eq('user_id', me.id)),
         q(sb.from('submissions').select('*, assignments(title)').eq('student_id', me.id)),
-        q(sb.from('messages').select('*').or(`student_id.eq.${me.id},sender_id.eq.${me.id}`))]);
-      const blob = new Blob([JSON.stringify({ exported_at: new Date().toISOString(), email: me.email, profile, enrollments, submissions, messages }, null, 2)], { type: 'application/json' });
+        q(sb.from('messages').select('*').or(`student_id.eq.${me.id},sender_id.eq.${me.id}`)),
+        q(sb.from('lesson_progress').select('completed_at, score, lessons(title)').eq('user_id', me.id)),
+        q(sb.from('activity_events').select('kind, label, ref, created_at').eq('user_id', me.id).order('created_at').limit(5000))]);
+      const blob = new Blob([JSON.stringify({ exported_at: new Date().toISOString(), email: me.email, profile, enrollments, progress, activity, submissions, messages }, null, 2)], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'academy-ta-dedomena-mou.json'; a.click();
     } catch (er) { toast(errText(er), true); }
   };
@@ -387,6 +397,11 @@ function classCards(list, extra) {
 }
 
 async function studentHome(tok) {
+  const [lessons, myProg] = await Promise.all([
+    q(sb.from('lessons').select('id,class_id').eq('published', true)),
+    q(sb.from('lesson_progress').select('lesson_id,class_id').eq('user_id', me.id))]);
+  const tot = {}, dn = {}; lessons.forEach(l => tot[l.class_id] = (tot[l.class_id] || 0) + 1);
+  const pubIds = new Set(lessons.map(l => l.id)); myProg.filter(p => pubIds.has(p.lesson_id)).forEach(p => dn[p.class_id] = (dn[p.class_id] || 0) + 1);
   const [classes, asgs, subs, anns] = await Promise.all([
     q(sb.from('classes').select('id,name,description').order('created_at')),
     F.assignments ? q(sb.from('assignments').select('id,title,due_at,class_id,allow_late,classes(name)').order('due_at', { ascending: true, nullsFirst: false })) : none(),
@@ -401,7 +416,8 @@ async function studentHome(tok) {
   app.innerHTML = `<div class="row between"><h1>Γεια σας, ${esc(me.full_name.split(' ')[0])}</h1></div>
   <div class="${side ? 'two' : ''}"><div class="stack">
     <div class="panel"><h2>Ενότητες</h2>
-      ${classes.length ? classCards(classes) : `<div class="empty">Δεν υπάρχει ακόμη διαθέσιμο υλικό. Ξαναδείτε σύντομα!</div>`}
+      ${classes.length ? classCards(classes, c => tot[c.id] ? progressBar(dn[c.id] || 0, tot[c.id], dn[c.id] === tot[c.id] ? '🎉 Ολοκληρώθηκε' : dn[c.id] ? 'Πρόοδος' : 'Δεν ξεκίνησε ακόμη') : '<span class="muted small">Σύντομα μαθήματα</span>')
+        : `<div class="empty">Δεν υπάρχει ακόμη διαθέσιμο υλικό. Ξαναδείτε σύντομα!</div>`}
       <details style="margin-top:14px"><summary class="muted small" style="cursor:pointer">Έχετε κωδικό για κλειστή ενότητα;</summary>
       <form class="row" id="join" style="margin-top:8px"><input class="inp" name="code" placeholder="Κωδικός ενότητας" maxlength="12" style="max-width:220px;text-transform:uppercase" required><button class="btn">Είσοδος</button></form></details>
     </div>
@@ -447,7 +463,7 @@ async function teacherHome(tok) {
   const cnt = {}; enr.forEach(e => cnt[e.class_id] = (cnt[e.class_id] || 0) + 1);
   const pc = {}; pend.forEach(p => pc[p.assignments.class_id] = (pc[p.assignments.class_id] || 0) + 1);
   const side = F.assignments || unreadHTML;
-  app.innerHTML = `<div class="row between"><h1>Οι ενότητές μου</h1><a class="btn accent" href="#/new-class">+ Νέα ενότητα</a></div>
+  app.innerHTML = `<div class="row between"><h1>Οι ενότητές μου</h1><span class="row"><a class="btn" href="#/admin">📊 Στατιστικά</a><a class="btn accent" href="#/new-class">+ Νέα ενότητα</a></span></div>
   <div class="${side ? 'two' : ''}"><div class="panel">
     ${classes.length ? classCards(classes, c => `<div class="row">${c.is_open ? '<span class="pill ok">Ανοιχτή σε όλους</span>' : `<span class="pill">Κλειστή · ${cnt[c.id] || 0} μέλη</span>`}${pc[c.id] ? `<span class="pill warn">${pc[c.id]} προς βαθμολόγηση</span>` : ''}${c.archived ? '<span class="pill">Αρχειοθετημένο</span>' : ''}</div>`)
       : `<div class="empty">Δεν έχετε ενότητες ακόμη. Φτιάξτε την πρώτη και προσθέστε μαθήματα.</div>`}
@@ -472,10 +488,44 @@ route(/^\/new-class$/, async () => {
 });
 
 // ================================================================ ΤΜΗΜΑ
+const PREVIEW_KEY = 'csl-preview';
+const inPreview = cid => { try { return sessionStorage.getItem(PREVIEW_KEY) === cid; } catch { return false; } };
 async function loadClass(cid) {
   const c = await q(sb.from('classes').select('*').eq('id', cid).maybeSingle());
   if (!c) throw new Error('Η ενότητα δεν βρέθηκε ή δεν έχετε πρόσβαση.');
-  c.mine = c.owner === me.id; return c;
+  c.owner_me = c.owner === me.id;
+  c.preview = c.owner_me && inPreview(cid);     // ο διαχειριστής βλέπει όπως ένας χρήστης
+  c.mine = c.owner_me && !c.preview;
+  return c;
+}
+// μαθήματα όπως τα βλέπει ο χρήστης + πρόοδος + ποια είναι κλειδωμένα
+async function lessonState(c) {
+  let ls = await q(sb.from('lessons').select('id,title,summary,position,published,videos,sims,quiz').eq('class_id', c.id).order('position').order('created_at'));
+  if (!c.mine) ls = ls.filter(l => l.published);
+  const prog = await q(sb.from('lesson_progress').select('lesson_id,score,completed_at,user_id').eq('class_id', c.id));
+  const mineP = prog.filter(p => p.user_id === me.id);
+  const done = new Map(mineP.map(p => [p.lesson_id, p]));
+  let blocked = false;
+  ls.forEach(l => {
+    l.done = done.get(l.id) || null;
+    l.locked = !c.mine && c.sequential && blocked;
+    if (!l.done && l.published) blocked = true;
+    l.completions = prog.filter(p => p.lesson_id === l.id && p.user_id !== me.id).length;
+  });
+  const pub = ls.filter(l => l.published);
+  const learners = new Set(prog.filter(p => p.user_id !== me.id).map(p => p.user_id)).size;
+  return { ls, doneN: pub.filter(l => l.done).length, total: pub.length, learners };
+}
+function progressBar(done, total, label) {
+  const pc = total ? Math.round(100 * done / total) : 0;
+  return `<div class="prog"><div class="prog-top"><span>${label || 'Πρόοδος'}</span><b>${done}/${total} · ${pc}%</b></div>
+    <div class="prog-bar" role="progressbar" aria-valuenow="${pc}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pc}%"></span></div></div>`;
+}
+const QUIZ_PASS = 0.7;   // ποσοστό σωστών για ολοκλήρωση μαθήματος με κουίζ
+// καταγραφή δραστηριότητας χρήστη (όχι του διαχειριστή) — αθόρυβα, χωρίς να σταματά τη σελίδα
+function track(c, lessonId, kind, ref, label) {
+  if (!c || c.owner_me || !session) return;
+  sb.from('activity_events').insert({ lesson_id: lessonId, class_id: c.id, kind, ref: ref || null, label: label || null }).then(() => {}, () => {});
 }
 function classHead(c, tab) {
   const tabs = [['', 'Μαθήματα']];
@@ -483,7 +533,9 @@ function classHead(c, tab) {
   if (F.announcements) tabs.push(['ann', 'Ανακοινώσεις']);
   if (F.messages) tabs.push(['chat', 'Μηνύματα']);
   if (c.mine) tabs.push(['students', 'Πρόσβαση'], ['settings', 'Ρυθμίσεις']);
-  return `<p class="small"><a href="#/">← ${c.mine ? 'Οι ενότητές μου' : 'Ο πίνακάς μου'}</a></p>
+  return `${c.preview ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε την ενότητα όπως οι χρήστες (χωρίς πρόχειρα).</span><span class="row"><button class="btn small" id="prev-reset">Μηδενισμός προόδου μου</button><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : ''}
+    <p class="small"><a href="#/">← ${c.owner_me ? 'Οι ενότητές μου' : 'Ο πίνακάς μου'}</a></p>
+    ${c.mine ? `<div style="float:right"><button class="btn small" id="prev-on">👁 Προβολή ως χρήστης</button></div>` : ''}
     <h1>${esc(c.name)}${c.archived ? ' <span class="pill">Αρχειοθετημένο</span>' : ''}</h1>
     ${c.description ? `<p class="muted" style="margin:0">${esc(c.description)}</p>` : ''}
     <nav class="tabs">${tabs.map(([k, t]) => `<a href="#/c/${c.id}${k ? '/' + k : ''}" class="${tab === k ? 'on' : ''}">${t}</a>`).join('')}</nav>`;
@@ -502,13 +554,22 @@ route(/^\/c\/([\w-]{36})(?:\/(asg|ann|students|settings))?$/, async (cid, tab, t
 });
 
 async function tabLessons(c) {
-  const ls = await q(sb.from('lessons').select('id,title,summary,position,published,videos,sims').eq('class_id', c.id).order('position').order('created_at'));
+  const st = await lessonState(c), ls = st.ls;
+  const next = ls.find(l => l.published && !l.done && !l.locked);
+  const card = (l, i) => {
+    const meta = `<div class="row small muted" style="margin-top:8px">${l.videos.length ? `<span>▶ ${l.videos.length} βίντεο</span>` : ''}${l.sims.length ? `<span>◎ ${l.sims.length} προσομοιώσεις</span>` : ''}${parseQuiz(l.quiz).length ? `<span>✎ αυτοέλεγχος</span>` : ''}</div>`;
+    const status = c.mine ? (!l.published ? '<span class="pill warn">Πρόχειρο</span>' : `<span class="pill">${l.completions} ολοκλήρωσαν</span>`)
+      : l.done ? '<span class="pill ok">✓ Ολοκληρώθηκε</span>' : l.locked ? '<span class="pill">🔒 Κλειδωμένο</span>' : l === next ? '<span class="pill info">Επόμενο</span>' : '';
+    const inner = `<div class="row between"><span class="muted small">Μάθημα ${i + 1}</span>${status}</div>
+      <h3>${esc(l.title)}</h3><p class="muted small" style="margin:0">${esc((l.summary || '').replace(/\*\*/g, '')).slice(0, 140)}${(l.summary || '').length > 140 ? '…' : ''}</p>${meta}`;
+    return l.locked ? `<div class="card locked" title="Ολοκληρώστε πρώτα τα προηγούμενα μαθήματα">${inner}</div>`
+      : `<a class="card ${l === next ? 'next' : ''} ${l.done ? 'done' : ''}" href="#/c/${c.id}/lesson/${l.id}">${inner}</a>`;
+  };
   return {
-    html: `${c.mine ? `<div class="row" style="margin-bottom:12px"><button class="btn accent" id="newl">+ Νέο μάθημα</button><span class="muted small">Τα μη δημοσιευμένα μαθήματα δεν τα βλέπουν οι χρήστες.</span></div>` : ''}
-    ${ls.length ? `<div class="grid">${ls.map((l, i) => `<a class="card" href="#/c/${c.id}/lesson/${l.id}">
-      <div class="row between"><span class="muted small">Μάθημα ${i + 1}</span>${!l.published ? '<span class="pill warn">Πρόχειρο</span>' : ''}</div>
-      <h3>${esc(l.title)}</h3><p class="muted small" style="margin:0">${esc((l.summary || '').replace(/\*\*/g, '')).slice(0, 140)}${(l.summary || '').length > 140 ? '…' : ''}</p>
-      <div class="row small muted" style="margin-top:8px">${l.videos.length ? `<span>▶ ${l.videos.length} βίντεο</span>` : ''}${l.sims.length ? `<span>◎ ${l.sims.length} προσομοιώσεις</span>` : ''}</div></a>`).join('')}</div>`
+    html: `${c.mine ? `<div class="row" style="margin-bottom:12px"><button class="btn accent" id="newl">+ Νέο μάθημα</button><span class="muted small">Τα πρόχειρα δεν τα βλέπουν οι χρήστες.${st.learners ? ` · ${st.learners} χρήστες έχουν ολοκληρώσει τουλάχιστον ένα μάθημα.` : ''}</span></div>`
+      : st.total ? `<div class="panel" style="margin-bottom:14px">${progressBar(st.doneN, st.total, 'Η πρόοδός μου')}
+        ${next ? `<div class="row" style="margin-top:10px"><a class="btn accent" href="#/c/${c.id}/lesson/${next.id}">${st.doneN ? 'Συνέχεια' : 'Ξεκινήστε'}: ${esc(next.title)} →</a></div>` : st.doneN === st.total ? '<p style="margin:10px 0 0"><b>🎉 Ολοκληρώσατε όλη την ενότητα!</b></p>' : ''}</div>` : ''}
+    ${ls.length ? `<div class="grid">${ls.map(card).join('')}</div>`
       : `<div class="empty">${c.mine ? 'Δεν υπάρχουν μαθήματα ακόμη.' : 'Δεν υπάρχουν ακόμη μαθήματα σε αυτή την ενότητα.'}</div>`}`,
     bind: () => {
       const b = $('#newl'); if (!b) return;
@@ -623,6 +684,7 @@ async function tabSettings(c) {
       <label>Τίτλος<input type="text" name="name" maxlength="120" value="${esc(c.name)}" required></label>
       <label>Περιγραφή<textarea name="desc" style="min-height:70px">${esc(c.description)}</textarea></label>
       <label class="chk"><input type="checkbox" name="open" ${c.is_open ? 'checked' : ''}> <span>Ανοιχτή σε όλους τους εγγεγραμμένους χρήστες (αλλιώς πρόσβαση μόνο με κωδικό)</span></label>
+      <label class="chk"><input type="checkbox" name="seq" ${c.sequential ? 'checked' : ''}> <span>Διαδοχικά μαθήματα: κάθε μάθημα ξεκλειδώνει όταν ολοκληρωθεί το προηγούμενο</span></label>
       <label class="chk"><input type="checkbox" name="arch" ${c.archived ? 'checked' : ''}> <span>Αρχειοθετημένο (οι χρήστες δεν έχουν πλέον πρόσβαση· εσείς κρατάτε όλο το υλικό)</span></label>
       <div><button class="btn primary">Αποθήκευση</button></div></form></div>
       <div class="panel" style="max-width:680px"><h2>Διαγραφή ενότητας</h2>
@@ -631,7 +693,7 @@ async function tabSettings(c) {
     bind: () => {
       $('#fs').onsubmit = async e => {
         e.preventDefault(); const f = e.target;
-        try { await q(sb.from('classes').update({ name: f.elements.namedItem('name').value.trim(), description: f.desc.value.trim(), is_open: f.open.checked, archived: f.arch.checked }).eq('id', c.id)); toast('Αποθηκεύτηκε.'); render(); }
+        try { await q(sb.from('classes').update({ name: f.elements.namedItem('name').value.trim(), description: f.desc.value.trim(), is_open: f.open.checked, sequential: f.seq.checked, archived: f.arch.checked }).eq('id', c.id)); toast('Αποθηκεύτηκε.'); render(); }
         catch (er) { toast(errText(er), true); }
       };
       $('#delc').onclick = async () => {
@@ -658,14 +720,14 @@ function materialsList(mats, canEdit) {
   return `<ul class="list">${mats.map(m => `<li class="row"><span class="spacer">📄 <button class="link" data-open="${esc(m.path)}">${esc(m.title)}</button> <span class="muted small">${fmtSize(m.size)}</span></span>
     ${canEdit ? `<button class="btn small danger" data-delmat="${m.id}" data-path="${esc(m.path)}">Αφαίρεση</button>` : ''}</li>`).join('')}</ul>`;
 }
-function bindMaterials(cid, itemId, canEdit) {
+function bindMaterials(cid, itemId, canEdit, onOpen) {
   const box = $('#mats');
   const refresh = async () => {   // ανανεώνει μόνο τη λίστα, ώστε να μη χάνονται αλλαγές της φόρμας
     const mats = await q(sb.from('materials').select('*').eq('item_id', itemId).order('created_at'));
     if (box) { box.innerHTML = materialsList(mats, canEdit); wire(); }
   };
   const wire = () => {
-    $$('[data-open]').forEach(b => b.onclick = () => openFile('materials', b.dataset.open));
+    $$('[data-open]').forEach(b => b.onclick = () => { if (onOpen) onOpen(b.dataset.open, b.textContent); openFile('materials', b.dataset.open); });
     $$('[data-delmat]').forEach(b => b.onclick = async () => {
       if (!confirm('Αφαίρεση αρχείου;')) return;
       try { await sb.storage.from('materials').remove([b.dataset.path]); await q(sb.from('materials').delete().eq('id', b.dataset.delmat)); await refresh(); }
@@ -700,22 +762,68 @@ route(/^\/c\/([\w-]{36})\/lesson\/([\w-]{36})(\/edit)?$/, async (cid, lid, edit,
     q(sb.from('materials').select('*').eq('item_id', lid).order('created_at')),
     F.assignments ? q(sb.from('assignments').select('id,title,due_at,published').eq('lesson_id', lid)) : none()]);
   if (stale(tok)) return;
-  if (!l) throw new Error('Το μάθημα δεν βρέθηκε.');
+  if (!l || (!c.mine && !l.published)) throw new Error('Το μάθημα δεν βρέθηκε.');
   if (edit && c.mine) return lessonEdit(c, l, mats);
+  const st = await lessonState(c); if (stale(tok)) return;
+  const idx = st.ls.findIndex(x => x.id === l.id), me_l = st.ls[idx] || {};
+  const nextL = st.ls.slice(idx + 1).find(x => x.published);
+  const prevL = st.ls.slice(0, idx).reverse().find(x => x.published);
+  if (me_l.locked) {
+    const first = st.ls.find(x => x.published && !x.done);
+    app.innerHTML = `<p class="small"><a href="#/c/${c.id}">← ${esc(c.name)}</a></p>
+      <div class="panel stack" style="max-width:640px"><h1>🔒 ${esc(l.title)}</h1>
+      <p>Το μάθημα ξεκλειδώνει όταν ολοκληρώσετε τα προηγούμενα.</p>
+      ${first ? `<p><a class="btn accent" href="#/c/${c.id}/lesson/${first.id}">Συνέχεια: ${esc(first.title)} →</a></p>` : ''}</div>`;
+    return;
+  }
+  const hasQuiz = parseQuiz(l.quiz).length > 0;
+  const doneBox = () => {
+    const d = (st.ls[idx] || {}).done;
+    if (c.mine) return `<div class="panel"><h2>Ολοκλήρωση</h2><p class="muted small">${me_l.completions || 0} χρήστες ολοκλήρωσαν αυτό το μάθημα.${hasQuiz ? ` Για ολοκλήρωση απαιτούνται ${Math.round(QUIZ_PASS * 100)}% σωστές απαντήσεις στον αυτοέλεγχο.` : ' Ο χρήστης το ολοκληρώνει με ένα κουμπί (δεν υπάρχει αυτοέλεγχος).'}</p></div>`;
+    return `<div class="panel" id="donebox">${d
+      ? `<p style="margin:0 0 10px"><span class="pill ok">✓ Ολοκληρώθηκε</span> <span class="muted small">${fmtDate(d.completed_at)}${d.score != null ? ` · σκορ ${Math.round(d.score * 100)}%` : ''}</span></p>
+         ${nextL ? `<a class="btn accent" href="#/c/${c.id}/lesson/${nextL.id}">Επόμενο μάθημα: ${esc(nextL.title)} →</a>` : `<p style="margin:0"><b>🎉 Ολοκληρώσατε όλα τα μαθήματα της ενότητας!</b></p>`}`
+      : hasQuiz ? `<h2>Ολοκλήρωση μαθήματος</h2><p class="small" style="margin:0">Απαντήστε σωστά τουλάχιστον στο <b>${Math.round(QUIZ_PASS * 100)}%</b> των ερωτήσεων αυτοελέγχου και πατήστε «Έλεγχος απαντήσεων».${c.sequential && nextL ? ' Έτσι ξεκλειδώνει και το επόμενο μάθημα.' : ''}</p>`
+      : `<h2>Ολοκλήρωση μαθήματος</h2><p class="small">Είδατε το υλικό;${c.sequential && nextL ? ' Ολοκληρώστε το για να ξεκλειδώσει το επόμενο μάθημα.' : ''}</p><button class="btn accent" id="markdone">✓ Ολοκλήρωσα το μάθημα</button>`}</div>`;
+  };
+  const sims = l.sims.length ? `<div class="panel"><h2>Προσομοιώσεις</h2><div class="simcards">${l.sims.map(s => `<a class="simcard" href="${esc(simHref(s))}" target="_blank" rel="noopener">
+      <img src="sims/${esc(s)}.jpg" alt="" loading="lazy" onerror="this.remove()"><span>◎ ${esc(simLabel(s))}</span></a>`).join('')}</div></div>` : '';
   app.innerHTML = `<p class="small"><a href="#/c/${c.id}">← ${esc(c.name)}</a></p>
+    ${!c.mine && st.total ? `<div style="max-width:420px;margin-bottom:8px">${progressBar(st.doneN, st.total)}</div>` : ''}
     <div class="row between"><h1>${esc(l.title)}</h1>${c.mine ? `<a class="btn" href="#/c/${c.id}/lesson/${l.id}/edit">Επεξεργασία</a>` : ''}</div>
     ${!l.published ? msgBox('warn', 'Πρόχειρο — δεν είναι ορατό στους χρήστες.') : ''}
     <div class="two" style="margin-top:12px"><div class="stack">
       ${l.summary ? `<div class="panel text"><h2>Σύνοψη</h2>${rich(l.summary)}</div>` : ''}
       ${l.videos.length ? `<div class="panel"><h2>Βίντεο</h2>${videoCards(l.videos)}</div>` : ''}
-      ${parseQuiz(l.quiz).length ? `<div class="panel" id="quiz"><h2>Αυτοέλεγχος</h2>${quizHTML(l.quiz)}</div>` : ''}
+      ${sims}
+      ${hasQuiz ? `<div class="panel" id="quiz"><h2>Αυτοέλεγχος</h2>${quizHTML(l.quiz)}</div>` : ''}
+      <div id="donewrap">${doneBox()}</div>
     </div><div class="stack">
-      ${l.sims.length ? `<div class="panel"><h2>Προσομοιώσεις</h2><div class="sims">${l.sims.map(s => `<a class="btn" href="${esc(simHref(s))}" target="_blank" rel="noopener">◎ ${esc(simLabel(s))}</a>`).join('')}</div></div>` : ''}
       ${mats.length ? `<div class="panel"><h2>Υλικό</h2><div id="mats">${materialsList(mats, false)}</div></div>` : ''}
       ${as.filter(a => a.published || c.mine).length ? `<div class="panel"><h2>Εργασίες</h2><ul class="list">${as.filter(a => a.published || c.mine).map(a => `<li><a href="#/c/${c.id}/asg/${a.id}">${esc(a.title)}</a>${a.due_at ? ` <span class="muted small">· έως ${fmtDate(a.due_at)}</span>` : ''}</li>`).join('')}</ul></div>` : ''}
+      <div class="panel small"><div class="row between">${prevL ? `<a href="#/c/${c.id}/lesson/${prevL.id}">← ${esc(prevL.title)}</a>` : '<span></span>'}${nextL && (c.mine || !nextL.locked || me_l.done) ? `<a href="#/c/${c.id}/lesson/${nextL.id}">${esc(nextL.title)} →</a>` : nextL ? `<span class="muted">🔒 ${esc(nextL.title)}</span>` : ''}</div></div>
     </div></div>`;
-  bindMaterials(c.id, l.id);
-  const qz = $('#quiz'); if (qz) bindQuiz(qz, l.quiz);
+  bindMaterials(c.id, l.id, false, (path, title) => track(c, l.id, 'material_download', path, title));
+  $$('a.vid').forEach(a => a.addEventListener('click', () => track(c, l.id, 'video_open', a.href, 'YouTube ' + (ytId(a.href) || ''))));
+  $$('a.simcard').forEach(a => a.addEventListener('click', () => track(c, l.id, 'sim_open', a.getAttribute('href'), a.textContent.replace('◎', '').trim())));
+  try { const k = 'csl-v-' + l.id; if (!sessionStorage.getItem(k)) { sessionStorage.setItem(k, '1'); track(c, l.id, 'lesson_view', null, l.title); } } catch { track(c, l.id, 'lesson_view', null, l.title); }
+  const complete = async score => {
+    if (c.mine || (st.ls[idx] || {}).done) return;
+    try {
+      const row = await q(sb.from('lesson_progress').upsert({ lesson_id: l.id, class_id: c.id, score }).select().single());
+      st.ls[idx].done = row; st.doneN++;
+      track(c, l.id, 'lesson_complete', null, l.title);
+      $('#donewrap').innerHTML = doneBox();
+      toast(nextL ? 'Μπράβο! Το επόμενο μάθημα ξεκλείδωσε.' : 'Μπράβο! Ολοκληρώσατε την ενότητα.');
+    } catch (er) { toast(errText(er), true); }
+  };
+  const qz = $('#quiz');
+  if (qz) bindQuiz(qz, l.quiz, (sc, n) => {
+    if (c.mine || (st.ls[idx] || {}).done) return;
+    if (sc / n >= QUIZ_PASS) complete(sc / n);
+    else toast(`Χρειάζονται τουλάχιστον ${Math.ceil(QUIZ_PASS * n)} σωστές. Ξαναδοκιμάστε!`, true);
+  });
+  const md = $('#markdone'); if (md) md.onclick = () => complete(null);
 });
 
 function simPicker(selected) {
@@ -994,6 +1102,99 @@ route(/^\/c\/([\w-]{36})\/chat(?:\/([\w-]{36}))?$/, async (cid, sid, tok) => {
   const iv = setInterval(() => { if (stale(tok)) return clearInterval(iv); if (document.visibilityState === 'visible') load().catch(() => {}); }, 15000);
 });
 
+
+// ================================================================ ΣΤΑΤΙΣΤΙΚΑ ΔΙΑΧΕΙΡΙΣΤΗ
+const KIND = {
+  lesson_view: ['👁', 'Άνοιξε μάθημα'], lesson_complete: ['✓', 'Ολοκλήρωσε μάθημα'],
+  material_download: ['📄', 'Κατέβασε αρχείο'], video_open: ['▶', 'Άνοιξε βίντεο'], sim_open: ['◎', 'Άνοιξε προσομοίωση']
+};
+const tile = (v, label, sub) => `<div class="tile"><b>${v}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+const relDay = d => {
+  if (!d) return '—';
+  const days = Math.floor((Date.now() - new Date(d)) / 864e5);
+  return days <= 0 ? 'σήμερα' : days === 1 ? 'χθες' : days < 30 ? `πριν ${days} μέρες` : fmtDay(d);
+};
+function dailyChart(daily) {
+  const W = 720, H = 180, P = { l: 34, r: 8, t: 10, b: 24 };
+  const max = Math.max(4, ...daily.map(d => d.events));
+  const step = Math.pow(10, Math.floor(Math.log10(max))) * (max / Math.pow(10, Math.floor(Math.log10(max))) > 5 ? 2 : 1);
+  const top = Math.ceil(max / step) * step;
+  const bw = (W - P.l - P.r) / daily.length, y = v => P.t + (H - P.t - P.b) * (1 - v / top);
+  const ticks = []; for (let v = 0; v <= top; v += step) ticks.push(v);
+  return `<div class="chartwrap"><svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Ενέργειες χρηστών ανά ημέρα, τελευταίες 30 ημέρες">
+    ${ticks.map(v => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${P.l - 6}" y="${y(v) + 4}" class="ax" text-anchor="end">${v}</text>`).join('')}
+    ${daily.map((d, i) => { const x = P.l + i * bw + 1, h = H - P.b - y(d.events);
+      return `<g class="bar" data-tip="${fmtDay(d.day)}: ${d.events} ενέργειες · ${d.users} χρήστες"><rect x="${P.l + i * bw}" y="${P.t}" width="${bw}" height="${H - P.t - P.b}" fill="transparent"/>
+      ${d.events ? `<path d="M${x},${H - P.b} v${-(h - 3)} q0,-3 3,-3 h${bw - 8} q3,0 3,3 v${h - 3} z" class="mark"/>` : ''}</g>`; }).join('')}
+    ${daily.map((d, i) => i % 5 === 0 || i === daily.length - 1 ? `<text x="${P.l + i * bw + bw / 2}" y="${H - 6}" class="ax" text-anchor="middle">${fmtDay(d.day)}</text>` : '').join('')}
+  </svg><div class="tip" hidden></div></div>`;
+}
+function bindChart() {
+  const w = $('.chartwrap'); if (!w) return; const tip = $('.tip', w);
+  $$('.bar', w).forEach(g => {
+    g.addEventListener('mousemove', e => { const r = w.getBoundingClientRect(); tip.textContent = g.dataset.tip; tip.hidden = false;
+      tip.style.left = Math.min(r.width - 170, Math.max(0, e.clientX - r.left - 80)) + 'px'; tip.style.top = (e.clientY - r.top - 44) + 'px'; g.classList.add('on'); });
+    g.addEventListener('mouseleave', () => { tip.hidden = true; g.classList.remove('on'); });
+  });
+}
+
+route(/^\/admin$/, async tok => {
+  if (needLogin()) return;
+  if (!isTeacher()) return go('#/');
+  const o = await q(sb.rpc('admin_overview')); if (stale(tok)) return;
+  const k = o.kpi, del = o.deleted || {};
+  const delAny = (del.views || 0) + (del.completions || 0) + (del.downloads || 0) + (del.videos || 0) + (del.sims || 0);
+  app.innerHTML = `<p class="small"><a href="#/">← Οι ενότητές μου</a></p>
+  <div class="row between"><h1>📊 Στατιστικά</h1><button class="btn small" id="csvu">Λήψη χρηστών (CSV)</button></div>
+  <div class="tiles">
+    ${tile(k.users, 'εγγεγραμμένοι χρήστες', `+${k.new7} τις τελευταίες 7 μέρες`)}
+    ${tile(k.active7, 'ενεργοί (7 ημέρες)', 'με τουλάχιστον μία ενέργεια')}
+    ${tile(k.completions, 'ολοκληρώσεις μαθημάτων')}
+    ${tile(k.downloads, 'λήψεις αρχείων')}
+    ${tile(k.videos, 'ανοίγματα βίντεο')}
+    ${tile(k.sims, 'ανοίγματα προσομοιώσεων')}
+  </div>
+  <div class="panel"><h2>Δραστηριότητα — τελευταίες 30 ημέρες</h2>${dailyChart(o.daily)}</div>
+  <div class="panel"><h2>Ανά μάθημα</h2><div class="tablewrap"><table class="t"><thead><tr><th>Μάθημα</th><th>Ενότητα</th><th class="n">Προβολές</th><th class="n">Μοναδικοί</th><th class="n">Ολοκληρώσεις</th><th class="n">Λήψεις</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody>
+    ${o.lessons.map(l => `<tr><td>${esc(l.title)}</td><td class="muted">${esc(l.class_name)}</td><td class="n">${l.views}</td><td class="n">${l.viewers}</td><td class="n">${l.completions}</td><td class="n">${l.downloads}</td><td class="n">${l.videos}</td><td class="n">${l.sims}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Δεν υπάρχουν δημοσιευμένα μαθήματα.</td></tr>'}
+  </tbody></table></div></div>
+  <div class="panel"><div class="row between"><h2 style="margin:0">Χρήστες (${o.people.length})</h2><input class="inp" id="uq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:280px"></div>
+  <div class="tablewrap" style="margin-top:10px"><table class="t"><thead><tr><th>Όνομα</th><th>Email</th><th>Εγγραφή</th><th>Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Λήψεις</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
+    ${o.people.map(p => `<tr class="click" data-u="${p.id}" data-s="${esc((p.full_name + ' ' + p.email).toLowerCase())}"><td>${esc(p.full_name)}</td><td class="muted">${esc(p.email)}</td><td>${fmtDay(p.created_at)}</td><td>${relDay(p.last_activity)}</td><td class="n">${p.completions}</td><td class="n">${p.downloads}</td><td class="n">${p.videos}</td><td class="n">${p.sims}</td></tr>`).join('')}
+    ${delAny ? `<tr class="click deleted" data-u="deleted" data-s=""><td colspan="4"><i>Διαγραμμένοι χρήστες (ανώνυμα)</i></td><td class="n">${del.completions}</td><td class="n">${del.downloads}</td><td class="n">${del.videos}</td><td class="n">${del.sims}</td></tr>` : ''}
+  </tbody></table></div>
+  <p class="muted small">Τα «βίντεο» μετρούν τα κλικ για άνοιγμα στο YouTube, όχι τον χρόνο παρακολούθησης. Όταν ένας χρήστης διαγράφει τον λογαριασμό του, η δραστηριότητά του παραμένει μόνο ανώνυμα στα σύνολα.</p></div>`;
+  bindChart();
+  $$('#ub tr.click').forEach(r => r.onclick = () => go('#/admin/u/' + r.dataset.u));
+  $('#uq').oninput = e => { const v = e.target.value.trim().toLowerCase(); $$('#ub tr').forEach(r => r.hidden = !!v && !(r.dataset.s || '').includes(v)); };
+  $('#csvu').onclick = () => {
+    const cell = v => { v = String(v ?? ''); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const rows = [['Όνομα', 'Email', 'Εγγραφή', 'Τελευταία δραστηριότητα', 'Ολοκληρώσεις', 'Λήψεις', 'Βίντεο', 'Προσομοιώσεις']];
+    o.people.forEach(p => rows.push([p.full_name, p.email, fmtDay(p.created_at), p.last_activity ? fmtDate(p.last_activity) : '', p.completions, p.downloads, p.videos, p.sims]));
+    const blob = new Blob(['﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'academy-xristes.csv'; a.click();
+  };
+});
+
+route(/^\/admin\/u\/([\w-]{36}|deleted)$/, async (uid, tok) => {
+  if (needLogin()) return;
+  if (!isTeacher()) return go('#/');
+  const delUser = uid === 'deleted';
+  const [ev, o] = await Promise.all([q(sb.rpc('admin_user_activity', { uid: delUser ? null : uid })), q(sb.rpc('admin_overview'))]);
+  if (stale(tok)) return;
+  const p = o.people.find(x => x.id === uid);
+  const byDay = {}; ev.forEach(e => (byDay[fmtDay(e.created_at)] = byDay[fmtDay(e.created_at)] || []).push(e));
+  app.innerHTML = `<p class="small"><a href="#/admin">← Στατιστικά</a></p>
+    <h1>${delUser ? 'Διαγραμμένοι χρήστες (ανώνυμα)' : esc(p ? p.full_name : 'Χρήστης')}</h1>
+    ${p ? `<p class="muted">${esc(p.email)} · εγγραφή ${fmtDate(p.created_at)} · τελευταία σύνδεση ${p.last_sign_in_at ? fmtDate(p.last_sign_in_at) : '—'}</p>
+    <div class="tiles">${tile(p.completions, 'ολοκληρώσεις')}${tile(p.downloads, 'λήψεις αρχείων')}${tile(p.videos, 'ανοίγματα βίντεο')}${tile(p.sims, 'ανοίγματα προσομοιώσεων')}</div>` : ''}
+    <div class="panel"><h2>Χρονολόγιο${ev.length >= 500 ? ' (τελευταίες 500 ενέργειες)' : ''}</h2>
+    ${ev.length ? Object.entries(byDay).map(([d, list]) => `<h3 class="day">${d}</h3><ul class="list tl">${list.map(e => `<li class="row">
+      <span class="ico">${(KIND[e.kind] || ['•'])[0]}</span><span class="spacer"><b>${(KIND[e.kind] || ['', e.kind])[1]}</b>${e.kind === 'lesson_view' || e.kind === 'lesson_complete' ? '' : `: ${esc(e.label || e.ref || '')}`}
+      <br><span class="muted small">${esc(e.lesson || '')}${e.class_name ? ' · ' + esc(e.class_name) : ''}</span></span>
+      <span class="muted small">${new Intl.DateTimeFormat('el-GR', { hour: '2-digit', minute: '2-digit' }).format(new Date(e.created_at))}</span></li>`).join('')}</ul>`).join('')
+      : '<p class="muted">Καμία καταγεγραμμένη δραστηριότητα ακόμη.</p>'}</div>`;
+});
 
 // ================================================================ εκκίνηση
 function social() {

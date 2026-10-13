@@ -142,3 +142,37 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 .nav a.soc svg{display:block}
 @media (max-width:560px){.topbar-in{position:relative}.topbar-in .brand{padding-inline-end:84px}.nav{gap:2px}.nav a{padding:6px 8px;font-size:13px}
  .nav .social{position:absolute;top:12px;right:0;margin:0;background:rgba(255,255,255,.75);border-radius:999px;padding:1px 3px}}
+
+/* πρόοδος & κλείδωμα */
+.prog{display:grid;gap:5px}
+.prog-top{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+.prog-top b{color:var(--navy)}
+.prog-bar{height:10px;border-radius:999px;background:#DCE6EE;overflow:hidden}
+.prog-bar span{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--ok));border-radius:999px;transition:width .4s}
+.card.locked{opacity:.55;filter:grayscale(1);cursor:not-allowed;background:#F1F4F7}
+.card.next{border-color:var(--orange);box-shadow:0 0 0 2px rgba(226,103,43,.18)}
+.card.done h3::before{content:'✓ ';color:var(--ok)}
+/* κάρτες προσομοιώσεων */
+.simcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:12px}
+.simcard{display:block;text-decoration:none;color:var(--navy);border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;transition:box-shadow .15s,transform .15s}
+.simcard:hover{box-shadow:0 8px 20px rgba(16,38,63,.12);transform:translateY(-1px)}
+.simcard img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top;background:#F2F8FB;border-bottom:1px solid var(--line-2)}
+.simcard span{display:block;padding:8px 10px;font-weight:600;font-size:13.5px}
+
+/* στατιστικά διαχειριστή */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:12px 0 14px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:grid;gap:2px}
+.tile b{font-size:28px;line-height:1.1;color:var(--navy);font-weight:800}
+.tile span{font-size:13px;color:var(--ink);font-weight:600}
+.tile small{font-size:12px;color:var(--muted)}
+.chartwrap{position:relative}
+.chart{width:100%;height:auto;display:block}
+.chart .grid{stroke:#E3EAF0;stroke-width:1}
+.chart .ax{font-size:9px;fill:var(--muted)}
+.chart .mark{fill:var(--teal)}
+.chart .bar.on .mark{fill:#00838F}
+.tip{position:absolute;pointer-events:none;background:var(--navy);color:#fff;font-size:12.5px;padding:6px 9px;border-radius:8px;white-space:nowrap;box-shadow:0 6px 16px rgba(0,0,0,.18)}
+.t td.n,.t th.n{text-align:right;font-variant-numeric:tabular-nums}
+.t tr.deleted td{color:var(--muted);background:#F7F9FB}
+h3.day{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px}
+.tl .ico{width:26px;height:26px;border-radius:50%;background:var(--soft);border:1px solid var(--line-2);display:grid;place-items:center;font-size:13px;flex:none}
