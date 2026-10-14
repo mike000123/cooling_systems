@@ -811,9 +811,8 @@ route(/^\/c\/([\w-]{36})\/lesson\/([\w-]{36})(\/edit)?$/, async (cid, lid, edit,
     if (c.mine || (st.ls[idx] || {}).done) return;
     try {
       const row = await q(sb.from('lesson_progress').upsert({ lesson_id: l.id, class_id: c.id, score }).select().single());
-      st.ls[idx].done = row; st.doneN++;
       track(c, l.id, 'lesson_complete', null, l.title);
-      $('#donewrap').innerHTML = doneBox();
+      await render();   // ανανέωση μπάρας προόδου και συνδέσμων «επόμενο»
       toast(nextL ? 'Μπράβο! Το επόμενο μάθημα ξεκλείδωσε.' : 'Μπράβο! Ολοκληρώσατε την ενότητα.');
     } catch (er) { toast(errText(er), true); }
   };
