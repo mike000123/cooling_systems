@@ -565,24 +565,37 @@ route(/^\/c\/([\w-]{36})(?:\/(asg|ann|students|settings))?$/, async (cid, tab, t
 // ================================================================ ΑΝΤΙΓΡΑΦΗ ΜΑΘΗΜΑΤΩΝ / ΕΝΟΤΗΤΩΝ
 // Αντιγράφει μαθήματα (με τα αρχεία τους) σε άλλη ενότητα. Τα αντίγραφα μπαίνουν στο τέλος, με την ίδια σειρά.
 async function copyLessons(lessonIds, targetCid, publish, onProgress) {
-  if (!lessonIds.length) return 0;
+  const res = { n: 0, errors: [] };
+  if (!lessonIds.length) return res;
   const src = await q(sb.from('lessons').select('*').in('id', lessonIds).order('position').order('created_at'));
   const last = await q(sb.from('lessons').select('position').eq('class_id', targetCid).order('position', { ascending: false }).limit(1));
-  let pos = last.length ? (last[0].position || 0) : 0, n = 0;
-  for (const l of src) {
-    onProgress && onProgress(`Αντιγραφή: ${l.title}…`);
-    const nl = await q(sb.from('lessons').insert({ class_id: targetCid, position: ++pos, title: l.title, summary: l.summary, videos: l.videos,
-      recap_videos: l.recap_videos || [], sims: l.sims, quiz: l.quiz, published: !!publish }).select().single());
+  let pos = last.length ? (last[0].position || 0) : 0;
+  for (const [i, l] of src.entries()) {
+    onProgress && onProgress(`Αντιγραφή ${i + 1}/${src.length}: ${l.title}…`);
+    let nl;
+    try {
+      nl = await q(sb.from('lessons').insert({ class_id: targetCid, position: ++pos, title: l.title, summary: l.summary, videos: l.videos,
+        recap_videos: l.recap_videos || [], sims: l.sims, quiz: l.quiz, published: !!publish }).select().single());
+      res.n++;
+    } catch (er) { res.errors.push(`«${l.title}»: ${errText(er)}`); continue; }   // συνεχίζει με τα επόμενα
     const mats = await q(sb.from('materials').select('*').eq('item_id', l.id).order('created_at'));
     for (const m of mats) {
       const path = `${targetCid}/${nl.id}/${m.path.split('/').pop()}`;
-      await q(sb.storage.from('materials').copy(m.path, path));
-      await q(sb.from('materials').insert({ class_id: targetCid, item_id: nl.id, title: m.title, path, size: m.size }));
+      try {
+        const cp = await sb.storage.from('materials').copy(m.path, path);
+        if (cp.error) {   // εναλλακτικά: λήψη και νέο ανέβασμα
+          const blob = await q(sb.storage.from('materials').download(m.path));
+          await q(sb.storage.from('materials').upload(path, blob, { contentType: blob.type || 'application/octet-stream', upsert: true }));
+        }
+        await q(sb.from('materials').insert({ class_id: targetCid, item_id: nl.id, title: m.title, path, size: m.size }));
+      } catch (er) { res.errors.push(`«${l.title}» — αρχείο «${m.title}»: ${errText(er)}`); }
     }
-    n++;
   }
-  return n;
+  return res;
 }
+const copyReport = r => r.errors.length
+  ? msgBox('warn', `<b>Αντιγράφηκαν ${r.n} μαθήματα, αλλά ${r.errors.length} στοιχεία απέτυχαν:</b><ul style="margin:6px 0 0;padding-left:18px">${r.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>Μπορείτε να τα ξαναδοκιμάσετε με «Εισαγωγή από άλλη ενότητα».`)
+  : '';
 async function myOtherClasses(exceptId) {
   return (await q(sb.from('classes').select('id,name,archived').eq('owner', me.id).order('created_at'))).filter(x => x.id !== exceptId);
 }
@@ -622,21 +635,28 @@ async function importPanel(c) {
   const others = await myOtherClasses(c.id);
   if (!others.length) { box.innerHTML = msgBox('info', 'Δεν έχετε άλλες ενότητες για εισαγωγή.') + '<div style="height:12px"></div>'; return; }
   const ls = await q(sb.from('lessons').select('id,class_id,title,position,published').in('class_id', others.map(o => o.id)).order('position').order('created_at'));
+  const have = new Set((await q(sb.from('lessons').select('title').eq('class_id', c.id))).map(x => x.title.trim()));
   box.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Εισαγωγή μαθημάτων από άλλη ενότητα</h2>
     <p class="muted small">Επιλέξτε μαθήματα. Αντιγράφονται με όλο το περιεχόμενο (σύνοψη, βίντεο, προσομοιώσεις, αυτοέλεγχο, αρχεία) στο τέλος αυτής της ενότητας. Τα πρωτότυπα δεν αλλάζουν.</p>
-    ${others.map(o => { const mine = ls.filter(l => l.class_id === o.id); return `<details class="impcls" ${others.length === 1 ? 'open' : ''}><summary><b>${esc(o.name)}</b> <span class="muted small">(${mine.length} μαθήματα)</span></summary>
-      ${mine.length ? `<label class="chk small" style="margin:6px 0"><input type="checkbox" data-all="${o.id}"> <b>Όλα</b></label>
-      ${mine.map((l, i) => `<label class="chk"><input type="checkbox" name="impl" value="${l.id}" data-cls="${o.id}"> <span>${i + 1}. ${esc(l.title)}${l.published ? '' : ' <span class="pill warn">Πρόχειρο</span>'}</span></label>`).join('')}`
+    ${others.map(o => { const mine = ls.filter(l => l.class_id === o.id); return `<details class="impcls" ${others.length === 1 || mine.some(l => have.has(l.title.trim())) ? 'open' : ''}><summary><b>${esc(o.name)}</b> <span class="muted small">(${mine.length} μαθήματα)</span></summary>
+      ${mine.length ? `<label class="chk small" style="margin:6px 0"><input type="checkbox" data-all="${o.id}"> <b>Όλα</b></label>${mine.some(l => have.has(l.title.trim())) && mine.some(l => !have.has(l.title.trim())) ? ` <button type="button" class="btn small" data-miss="${o.id}">Επιλογή μόνο όσων λείπουν</button>` : ''}
+      ${mine.map((l, i) => `<label class="chk"><input type="checkbox" name="impl" value="${l.id}" data-cls="${o.id}" ${have.has(l.title.trim()) ? 'data-have="1"' : ''}> <span>${i + 1}. ${esc(l.title)}${l.published ? '' : ' <span class="pill warn">Πρόχειρο</span>'}${have.has(l.title.trim()) ? ' <span class="pill ok">υπάρχει ήδη εδώ</span>' : ''}</span></label>`).join('')}
+      `
         : '<p class="muted small">Χωρίς μαθήματα.</p>'}</details>`; }).join('')}
     <label class="chk" style="margin-top:10px"><input type="checkbox" id="imppub"> <span>Δημοσίευση αμέσως (αλλιώς μπαίνουν ως πρόχειρα για έλεγχο)</span></label>
     <div class="row" style="margin-top:10px"><button class="btn primary" id="impgo">Αντιγραφή επιλεγμένων</button><button class="btn" id="impx">Άκυρο</button><span class="muted small" id="impst"></span></div></div>`;
   $$('[data-all]', box).forEach(a => a.onchange = () => $$(`input[data-cls="${a.dataset.all}"]`, box).forEach(x => x.checked = a.checked));
+  $$('[data-miss]', box).forEach(a => a.onclick = () => $$(`input[data-cls="${a.dataset.miss}"]`, box).forEach(x => x.checked = !x.dataset.have));
   $('#impx').onclick = () => box.innerHTML = '';
   $('#impgo').onclick = async () => {
     const ids = $$('input[name=impl]:checked', box).map(x => x.value);
     if (!ids.length) return toast('Επιλέξτε τουλάχιστον ένα μάθημα.', true);
     const btn = $('#impgo'); btn.disabled = true;
-    try { const n = await copyLessons(ids, c.id, $('#imppub').checked, t => $('#impst').textContent = t); toast(`Αντιγράφηκαν ${n} μαθήματα.`); render(); }
+    try {
+      const r = await copyLessons(ids, c.id, $('#imppub').checked, t => $('#impst').textContent = t);
+      if (!r.errors.length) { toast(`Αντιγράφηκαν ${r.n} μαθήματα.`); return render(); }
+      await render(); $('#imppanel').innerHTML = copyReport(r) + '<div style="height:12px"></div>';
+    }
     catch (er) { toast(errText(er), true); btn.disabled = false; $('#impst').textContent = ''; }
   };
 }
@@ -765,8 +785,9 @@ async function tabSettings(c) {
         try {
           const nc = await q(sb.from('classes').insert({ name, description: c.description, is_open: c.is_open, sequential: c.sequential, owner: me.id }).select().single());
           const ids = (await q(sb.from('lessons').select('id').eq('class_id', c.id))).map(x => x.id);
-          const n = await copyLessons(ids, nc.id, false, t => $('#dupst').textContent = t);
-          toast(`Δημιουργήθηκε η «${name}» με ${n} μαθήματα (πρόχειρα).`); go('#/c/' + nc.id);
+          const r = await copyLessons(ids, nc.id, false, t => $('#dupst').textContent = t);
+          if (!r.errors.length) { toast(`Δημιουργήθηκε η «${name}» με ${r.n} μαθήματα (πρόχειρα).`); return go('#/c/' + nc.id); }
+          $('#dupst').innerHTML = copyReport(r) + `<p><a class="btn" href="#/c/${nc.id}">Άνοιγμα της «${esc(name)}» →</a></p>`;
         } catch (er) { toast(errText(er), true); btn.disabled = false; $('#dupst').textContent = ''; }
       };
       $('#delc').onclick = async () => {
@@ -956,7 +977,7 @@ function lessonEdit(c, l, mats) {
       <p class="small" style="margin:6px 0 0">Αποθηκεύστε πρώτα τυχόν αλλαγές. Το αντίγραφο μπαίνει ως πρόχειρο στο τέλος της ενότητας.</p></div>`;
     $('#copygo').onclick = async () => {
       const to = $('#copyto').value; $('#copygo').disabled = true;
-      try { await copyLessons([l.id], to, false); toast('Αντιγράφηκε.'); go('#/c/' + to); }
+      try { const r = await copyLessons([l.id], to, false); if (r.errors.length) { $('#copybox').innerHTML = copyReport(r); return; } toast('Αντιγράφηκε.'); go('#/c/' + to); }
       catch (er) { toast(errText(er), true); $('#copygo').disabled = false; }
     };
   };
