@@ -146,12 +146,16 @@ async function openFile(bucket, path) {
 const VIEWABLE = /\.(pdf|png|jpe?g|webp|gif)$/i;
 let pdfjsP = null;
 function loadPdfJs() {
-  return pdfjsP || (pdfjsP = new Promise((res, rej) => {
-    const s = document.createElement('script'); s.src = 'vendor/pdfjs/pdf.min.js';
-    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js'; res(window.pdfjsLib); };
-    s.onerror = () => { pdfjsP = null; rej(new Error('Δεν φορτώθηκε ο προβολέας PDF.')); };
+  // πρώτα το τοπικό αντίγραφο (vendor/pdfjs), αλλιώς από το cdnjs
+  const srcs = [['vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js'],
+    ['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js']];
+  const one = ([js, worker]) => new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = js;
+    s.onload = () => window.pdfjsLib ? (window.pdfjsLib.GlobalWorkerOptions.workerSrc = worker, res(window.pdfjsLib)) : rej(new Error('pdfjs'));
+    s.onerror = () => { s.remove(); rej(new Error('pdfjs')); };
     document.head.appendChild(s);
-  }));
+  });
+  return pdfjsP || (pdfjsP = one(srcs[0]).catch(() => one(srcs[1])).catch(() => { pdfjsP = null; throw new Error('Δεν φορτώθηκε ο προβολέας PDF. Ελέγξτε τη σύνδεση και δοκιμάστε ξανά.'); }));
 }
 const wmText = () => [me && me.full_name, session && session.user && session.user.email].filter(Boolean).join(' · ');
 function drawWatermark(ctx, w, h, text) {
@@ -246,6 +250,7 @@ async function render() {
   renderNav(h);
   if (!configured) { app.innerHTML = notConfigured(); return; }
   if (recovering) { viewNewPassword(); return; }
+  if (needsWelcome() && h !== '/deleted') { viewWelcome(); return; }
   for (const [re, fn] of routes) {
     const m = h.match(re);
     if (m) {
@@ -351,6 +356,49 @@ route(/^\/forgot$/, async () => {
     $('#out').innerHTML = error ? msgBox('err', esc(errText(error))) : msgBox('ok', 'Αν υπάρχει λογαριασμός με αυτό το email, θα λάβετε σύνδεσμο επαναφοράς.');
   };
 });
+
+// λογαριασμοί που δημιούργησε ο διαχειριστής: δικός τους κωδικός + συγκατάθεση στην πρώτη σύνδεση
+const needsWelcome = () => !!(session && me && !isTeacher() && (!me.consent_at || (session.user.user_metadata || {}).must_change_password));
+function viewWelcome() {
+  const mustPw = !!(session.user.user_metadata || {}).must_change_password, needC = !me.consent_at;
+  app.innerHTML = `<div class="panel" style="max-width:560px"><h1>Καλώς ήρθατε στην Academy</h1>
+    <p class="muted">Ο λογαριασμός <b>${esc(session.user.email)}</b> δημιουργήθηκε από τον διαχειριστή. Πριν συνεχίσετε${mustPw ? ', ορίστε τον δικό σας κωδικό' : ''}:</p>
+    <form class="f" id="fw">
+      <label>Ονοματεπώνυμο<input name="fullname" maxlength="80" required value="${esc(me.full_name === session.user.email.split('@')[0] ? '' : me.full_name)}" placeholder="π.χ. Γιώργος Παπαδόπουλος" autocomplete="name"></label>
+      ${mustPw ? `<label>Νέος κωδικός<input type="password" name="pw" minlength="8" autocomplete="new-password" required></label>
+      <label>Επανάληψη κωδικού<input type="password" name="pw2" minlength="8" autocomplete="new-password" required></label>` : ''}
+      ${needC ? `<label class="chk"><input type="checkbox" name="consent" required> <span>Διάβασα την <a href="privacy.html" target="_blank">πολιτική απορρήτου</a> και συμφωνώ με την επεξεργασία των στοιχείων μου για τη λειτουργία της Academy.</span></label>` : ''}
+      <div id="out"></div>
+      <div class="row"><button class="btn primary">Συνέχεια</button><span class="spacer"></span><button type="button" class="link small" id="wno">Δεν θέλω λογαριασμό — διαγραφή</button></div>
+    </form></div>`;
+  $('#fw').onsubmit = async e => {
+    e.preventDefault(); const f = e.target, out = $('#out');
+    const name = f.elements.namedItem('fullname').value.trim();
+    if (!name) return out.innerHTML = msgBox('err', 'Συμπληρώστε το ονοματεπώνυμο.');
+    let pw = null;
+    if (mustPw) {
+      pw = f.pw.value;
+      if (pw.length < 8) return out.innerHTML = msgBox('err', 'Ο κωδικός θέλει τουλάχιστον 8 χαρακτήρες.');
+      if (/^(.)\1+$/.test(pw) || /^(12345678|123456789|87654321|password)$/i.test(pw)) return out.innerHTML = msgBox('err', 'Επιλέξτε έναν λιγότερο προβλέψιμο κωδικό.');
+      if (pw !== f.pw2.value) return out.innerHTML = msgBox('err', 'Οι δύο κωδικοί δεν ταιριάζουν.');
+    }
+    if (needC && !f.consent.checked) return out.innerHTML = msgBox('err', 'Χρειάζεται η συγκατάθεσή σας στην πολιτική απορρήτου.');
+    const btn = f.querySelector('button.primary'); btn.disabled = true;
+    try {
+      const upd = { data: { must_change_password: false, full_name: name } }; if (pw) upd.password = pw;
+      const r = await sb.auth.updateUser(upd); if (r.error) throw r.error;
+      session.user = r.data.user;
+      await q(sb.from('profiles').update({ full_name: name }).eq('id', me.id));
+      if (needC) await q(sb.rpc('give_consent'));
+      await loadMe(); toast('Ο λογαριασμός σας είναι έτοιμος.'); go('#/');
+    } catch (er) { btn.disabled = false; out.innerHTML = msgBox('err', esc(errText(er))); }
+  };
+  $('#wno').onclick = async () => {
+    if (!confirm('Οριστική διαγραφή του λογαριασμού σας;')) return;
+    try { await q(sb.rpc('delete_my_account')); location.hash = '#/deleted'; await sb.auth.signOut({ scope: 'local' }); }
+    catch (er) { $('#out').innerHTML = msgBox('err', esc(errText(er))); }
+  };
+}
 
 function viewNewPassword() {
   app.innerHTML = `<div class="panel" style="max-width:520px"><h1>Νέος κωδικός</h1>
