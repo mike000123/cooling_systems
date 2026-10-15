@@ -187,7 +187,7 @@ h3.day{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing
 .recap:hover i{transform:scale(1.08)}
 /* αρχεία υλικού */
 .files{list-style:none;margin:0;padding:0;display:grid;gap:2px}
-.files li{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:7px 6px;border-radius:8px}
+.files li{display:grid;grid-template-columns:auto 1fr;grid-auto-flow:column;grid-auto-columns:auto;gap:10px;align-items:center;padding:7px 6px;border-radius:8px}
 .files li:hover{background:var(--soft)}
 .fext{font-size:10px;font-weight:800;letter-spacing:.02em;color:#fff;border-radius:5px;padding:3px 0;width:40px;text-align:center;line-height:1.3}
 .fname{background:none;border:0;padding:0;text-align:left;color:var(--blue);cursor:pointer;font-size:14px;line-height:1.35;overflow-wrap:anywhere}
@@ -207,3 +207,18 @@ h3.day{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing
 .reorder li.del{background:#fdf0ee;border-color:#f3c4bb}
 .reorder li.del .ro-t{text-decoration:line-through;color:#a3513f}
 .reorder .ro-del:hover{background:#fdecea;border-color:#e8a597}
+/* προβολή αρχείων μόνο για ανάγνωση */
+body.viewing{overflow:hidden}
+.viewer{position:fixed;inset:0;z-index:1000;background:rgba(11,24,40,.92);display:flex;flex-direction:column}
+.vbar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fff;border-bottom:1px solid var(--line)}
+.vbar .vtitle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.vbar .spacer{flex:1}
+.vpages{flex:1;overflow:auto;padding:16px 12px 40px;display:flex;flex-direction:column;align-items:center;gap:14px;-webkit-user-select:none;user-select:none}
+.vpage{background:#fff;max-width:100%;box-shadow:0 4px 18px rgba(0,0,0,.35);border-radius:2px;flex:none}
+.vpage:not(.ok){background:#fff linear-gradient(90deg,#f1f4f7 25%,#e6ebf0 50%,#f1f4f7 75%) 0 0/200% 100%}
+.vpage canvas{display:block;width:100%;height:auto;pointer-events:none}
+.files .fname:disabled{color:#8a96a3;cursor:not-allowed;text-decoration:none}
+.files .fdl{border:1px solid var(--line);background:#fff;border-radius:6px;padding:1px 7px;cursor:pointer;color:var(--navy);font-size:13px}
+.files .fallow{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:#4a5866;white-space:nowrap;margin-right:4px}
+@media print{body.viewing *{display:none!important}body.viewing::after{content:"Η εκτύπωση δεν επιτρέπεται.";display:block;padding:40px;font:16px sans-serif}}
+@media(max-width:600px){.vbar{padding:8px 10px}.vpages{padding:10px 6px 30px}}

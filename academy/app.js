@@ -142,6 +142,77 @@ async function openFile(bucket, path) {
   try { const u = await signedUrl(bucket, path); if (w) w.location = u; else location.href = u; }
   catch (e) { if (w) w.close(); toast(errText(e), true); }
 }
+// ---------------------------------------------------------------- προβολή αρχείων (χωρίς λήψη)
+const VIEWABLE = /\.(pdf|png|jpe?g|webp|gif)$/i;
+let pdfjsP = null;
+function loadPdfJs() {
+  return pdfjsP || (pdfjsP = new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = 'vendor/pdfjs/pdf.min.js';
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js'; res(window.pdfjsLib); };
+    s.onerror = () => { pdfjsP = null; rej(new Error('Δεν φορτώθηκε ο προβολέας PDF.')); };
+    document.head.appendChild(s);
+  }));
+}
+const wmText = () => [me && me.full_name, session && session.user && session.user.email].filter(Boolean).join(' · ');
+function drawWatermark(ctx, w, h, text) {
+  if (!text) return;
+  const fs = Math.max(13, Math.round(w / 38));
+  ctx.save(); ctx.globalAlpha = 0.12; ctx.fillStyle = '#0B2540'; ctx.font = `600 ${fs}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.translate(w / 2, h / 2); ctx.rotate(-Math.PI / 7);
+  const tw = ctx.measureText(text).width + fs * 4, step = fs * 6, D = Math.hypot(w, h);
+  for (let y = -D, r = 0; y < D; y += step, r++) for (let x = -D - (r % 2 ? tw / 2 : 0); x < D; x += tw) ctx.fillText(text, x, y);
+  ctx.restore();
+}
+async function viewFile(m, canDownload) {
+  const ov = document.createElement('div'); ov.className = 'viewer'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', m.title);
+  ov.innerHTML = `<div class="vbar"><b class="vtitle">${esc(m.title)}</b><span class="muted small" id="vinfo">Φόρτωση…</span><span class="spacer"></span>
+    ${canDownload ? '<button class="btn small" id="vdl">⬇ Λήψη</button>' : ''}<button class="btn small primary" id="vx">✕ Κλείσιμο</button></div><div class="vpages" id="vpages"></div>`;
+  document.body.appendChild(ov); document.body.classList.add('viewing');
+  let closed = false, pdf = null, io = null;
+  const onKey = e => {
+    if (e.key === 'Escape') close();
+    if ((e.ctrlKey || e.metaKey) && /^[sp]$/i.test(e.key)) { e.preventDefault(); e.stopPropagation(); }
+  };
+  const close = () => { if (closed) return; closed = true; io && io.disconnect(); ov.remove(); document.body.classList.remove('viewing'); document.removeEventListener('keydown', onKey, true); if (pdf) pdf.destroy(); };
+  document.addEventListener('keydown', onKey, true);
+  ov.addEventListener('contextmenu', e => e.preventDefault());
+  ov.addEventListener('dragstart', e => e.preventDefault());
+  $('#vx', ov).onclick = close; $('#vx', ov).focus();
+  if (canDownload) $('#vdl', ov).onclick = () => openFile('materials', m.path);
+  const pages = $('#vpages', ov), info = $('#vinfo', ov), wm = wmText();
+  const W = () => Math.max(260, Math.min(pages.clientWidth - 24, 1100));
+  try {
+    const blob = await q(sb.storage.from('materials').download(m.path));
+    if (closed) return;
+    if (/\.pdf$/i.test(m.title) || blob.type === 'application/pdf') {
+      const lib = await loadPdfJs();
+      pdf = await lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false, standardFontDataUrl: 'vendor/pdfjs/standard_fonts/' }).promise;
+      if (closed) { pdf.destroy(); return; }
+      info.textContent = pdf.numPages === 1 ? '1 σελίδα' : `${pdf.numPages} σελίδες`;
+      const w = W(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const v1 = (await pdf.getPage(1)).getViewport({ scale: 1 });
+      const slots = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const d = document.createElement('div'); d.className = 'vpage'; d.style.width = w + 'px'; d.style.aspectRatio = `${v1.width} / ${v1.height}`; d.dataset.n = i;
+        pages.appendChild(d); slots.push(d);
+      }
+      const draw = async d => {
+        const pg = await pdf.getPage(+d.dataset.n); if (closed) return;
+        const v0 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: w / v0.width * dpr });
+        const cv = document.createElement('canvas'); cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height);
+        const ctx = cv.getContext('2d'); await pg.render({ canvasContext: ctx, viewport: vp }).promise; if (closed) return;
+        drawWatermark(ctx, cv.width, cv.height, wm); d.style.aspectRatio = `${v0.width} / ${v0.height}`; d.appendChild(cv); d.classList.add('ok');
+      };
+      io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { io.unobserve(e.target); draw(e.target).catch(() => {}); } }), { root: pages, rootMargin: '1200px 0px' });
+      slots.forEach(d => io.observe(d));
+    } else if (/^image\//.test(blob.type) || /\.(png|jpe?g|webp|gif)$/i.test(m.title)) {
+      const img = await createImageBitmap(blob); if (closed) return;
+      const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+      const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0); drawWatermark(ctx, cv.width, cv.height, wm);
+      const d = document.createElement('div'); d.className = 'vpage ok'; d.style.width = Math.min(W(), img.width) + 'px'; d.appendChild(cv); pages.appendChild(d); info.textContent = '';
+    } else info.textContent = 'Αυτός ο τύπος αρχείου δεν προβάλλεται.';
+  } catch (e) { if (!closed) info.textContent = errText(e); }
+}
 const safeName = n => (n || 'file').normalize('NFKD').replace(/[^\w.\-]+/g, '_').replace(/_+/g, '_').slice(-80);
 // συμπίεση φωτογραφιών κινητού πριν το ανέβασμα (μέγ. 1600 px, JPEG)
 async function shrinkImage(file) {
@@ -587,7 +658,7 @@ async function copyLessons(lessonIds, targetCid, publish, onProgress) {
           const blob = await q(sb.storage.from('materials').download(m.path));
           await q(sb.storage.from('materials').upload(path, blob, { contentType: blob.type || 'application/octet-stream', upsert: true }));
         }
-        await q(sb.from('materials').insert({ class_id: targetCid, item_id: nl.id, title: m.title, path, size: m.size }));
+        await q(sb.from('materials').insert({ class_id: targetCid, item_id: nl.id, title: m.title, path, size: m.size, allow_download: !!m.allow_download }));
       } catch (er) { res.errors.push(`«${l.title}» — αρχείο «${m.title}»: ${errText(er)}`); }
     }
   }
@@ -858,24 +929,38 @@ async function tabSettings(c) {
 
 // ================================================================ ΥΛΙΚΟ (αρχεία)
 const EXT_COL = { pdf: '#D23A3A', ppt: '#E2672B', pptx: '#E2672B', doc: '#2B6CB0', docx: '#2B6CB0', xls: '#1C9A68', xlsx: '#1C9A68', zip: '#586C7D' };
-function materialsList(mats, canEdit) {
+function materialsList(mats, canEdit, owner) {
   if (!mats.length) return canEdit ? `<p class="muted small">Κανένα αρχείο.</p>` : '';
+  const anyHidden = canEdit && mats.some(m => !VIEWABLE.test(m.title) && !m.allow_download);
   return `<ul class="files">${mats.map(m => {
     const ext = ((m.title.match(/\.(\w{2,4})$/) || [])[1] || 'file').toLowerCase();
     const name = m.title.replace(/\.\w{2,4}$/, '');
+    const view = VIEWABLE.test(m.title), dl = owner || canEdit || m.allow_download, ok = view || dl;
     return `<li><span class="fext" style="background:${EXT_COL[ext] || '#586C7D'}">${esc(ext.slice(0, 4).toUpperCase())}</span>
-      <button class="fname" data-open="${esc(m.path)}" title="Λήψη: ${esc(m.title)}">${esc(name)}</button>
+      <button class="fname" ${ok ? '' : 'disabled'} data-open="${esc(m.path)}" data-title="${esc(m.title)}" data-view="${view ? 1 : ''}" data-dl="${dl ? 1 : ''}" title="${view ? 'Προβολή' : ok ? 'Λήψη' : 'Δεν είναι διαθέσιμο για προβολή'}: ${esc(m.title)}">${esc(name)}</button>
       <span class="fsize">${fmtSize(m.size)}</span>
-      ${canEdit ? `<button class="btn small danger" data-delmat="${m.id}" data-path="${esc(m.path)}">Αφαίρεση</button>` : ''}</li>`; }).join('')}</ul>`;
+      ${!canEdit && view && m.allow_download ? `<button class="fdl" data-dlonly="${esc(m.path)}" data-title="${esc(m.title)}" title="Λήψη: ${esc(m.title)}" aria-label="Λήψη: ${esc(m.title)}">⬇</button>` : ''}
+      ${canEdit ? `<label class="fallow" title="Επιτρέπεται στους χρήστες να το κατεβάσουν"><input type="checkbox" data-allow="${m.id}" ${m.allow_download ? 'checked' : ''}> Λήψη</label><button class="btn small danger" data-delmat="${m.id}" data-path="${esc(m.path)}">Αφαίρεση</button>` : ''}</li>`; }).join('')}</ul>
+    ${anyHidden ? `<p class="small" style="color:#a3513f;margin:6px 0 0">⚠ Τα αρχεία Word/PowerPoint κ.λπ. δεν προβάλλονται στον browser. Ανεβάστε τα ως PDF ή τσεκάρετε «Λήψη».</p>` : ''}
+    ${canEdit ? '<p class="muted small" style="margin:6px 0 0">Τα αρχεία ανοίγουν σε προβολή μόνο για ανάγνωση, με υδατογράφημα το email του χρήστη. Με «Λήψη» επιτρέπεται και το κατέβασμα.</p>' : ''}`;
 }
-function bindMaterials(cid, itemId, canEdit, onOpen) {
+function bindMaterials(cid, itemId, canEdit, onOpen, owner) {
   const box = $('#mats');
   const refresh = async () => {   // ανανεώνει μόνο τη λίστα, ώστε να μη χάνονται αλλαγές της φόρμας
     const mats = await q(sb.from('materials').select('*').eq('item_id', itemId).order('created_at'));
-    if (box) { box.innerHTML = materialsList(mats, canEdit); wire(); }
+    if (box) { box.innerHTML = materialsList(mats, canEdit, owner); wire(); }
   };
   const wire = () => {
-    $$('[data-open]').forEach(b => b.onclick = () => { if (onOpen) onOpen(b.dataset.open, b.textContent); openFile('materials', b.dataset.open); });
+    $$('[data-open]').forEach(b => b.onclick = () => {
+      if (onOpen) onOpen(b.dataset.open, b.dataset.title);
+      if (b.dataset.view) viewFile({ path: b.dataset.open, title: b.dataset.title }, !!b.dataset.dl);
+      else if (b.dataset.dl) openFile('materials', b.dataset.open);
+    });
+    $$('[data-dlonly]').forEach(b => b.onclick = () => { if (onOpen) onOpen(b.dataset.dlonly, b.dataset.title); openFile('materials', b.dataset.dlonly); });
+    $$('[data-allow]').forEach(x => x.onchange = async () => {
+      try { await q(sb.from('materials').update({ allow_download: x.checked }).eq('id', x.dataset.allow)); toast(x.checked ? 'Επιτρέπεται η λήψη.' : 'Μόνο προβολή.'); await refresh(); }
+      catch (er) { x.checked = !x.checked; toast(errText(er), true); }
+    });
     $$('[data-delmat]').forEach(b => b.onclick = async () => {
       if (!confirm('Αφαίρεση αρχείου;')) return;
       try { await sb.storage.from('materials').remove([b.dataset.path]); await q(sb.from('materials').delete().eq('id', b.dataset.delmat)); await refresh(); }
@@ -947,11 +1032,11 @@ route(/^\/c\/([\w-]{36})\/lesson\/([\w-]{36})(\/edit)?$/, async (cid, lid, edit,
       ${hasQuiz ? `<div class="panel" id="quiz"><h2>Αυτοέλεγχος</h2>${quizHTML(l.quiz)}</div>` : ''}
       <div id="donewrap">${doneBox()}</div>
     </div><div class="stack">
-      ${mats.length || (l.recap_videos || []).length ? `<div class="panel"><h2>Υλικό</h2>${recapCards(l.recap_videos)}${mats.length ? `<div id="mats">${materialsList(mats, false)}</div>` : ''}</div>` : ''}
+      ${mats.length || (l.recap_videos || []).length ? `<div class="panel"><h2>Υλικό</h2>${recapCards(l.recap_videos)}${mats.length ? `<div id="mats">${materialsList(mats, false, c.mine)}</div>` : ''}</div>` : ''}
       ${as.filter(a => a.published || c.mine).length ? `<div class="panel"><h2>Εργασίες</h2><ul class="list">${as.filter(a => a.published || c.mine).map(a => `<li><a href="#/c/${c.id}/asg/${a.id}">${esc(a.title)}</a>${a.due_at ? ` <span class="muted small">· έως ${fmtDate(a.due_at)}</span>` : ''}</li>`).join('')}</ul></div>` : ''}
       ${prevL || nextL ? `<div class="panel small"><div class="row between">${prevL ? `<a href="#/c/${c.id}/lesson/${prevL.id}">← ${esc(prevL.title)}</a>` : '<span></span>'}${nextL && (c.mine || !nextL.locked || me_l.done) ? `<a href="#/c/${c.id}/lesson/${nextL.id}">${esc(nextL.title)} →</a>` : nextL ? `<span class="muted">🔒 ${esc(nextL.title)}</span>` : ''}</div></div>` : ''}
     </div></div>`;
-  bindMaterials(c.id, l.id, false, (path, title) => track(c, l.id, 'material_download', path, title));
+  bindMaterials(c.id, l.id, false, (path, title) => track(c, l.id, 'material_download', path, title), c.mine);
   $$('a.vid').forEach(a => a.addEventListener('click', () => track(c, l.id, 'video_open', a.href, 'YouTube ' + (ytId(a.href) || ''))));
   $$('a.recap').forEach(a => a.addEventListener('click', () => track(c, l.id, 'video_open', a.href, 'Ανασκόπηση: ' + l.title)));
   $$('a.simcard').forEach(a => a.addEventListener('click', () => track(c, l.id, 'sim_open', a.getAttribute('href'), a.textContent.replace('◎', '').trim())));
@@ -1272,7 +1357,7 @@ route(/^\/c\/([\w-]{36})\/chat(?:\/([\w-]{36}))?$/, async (cid, sid, tok) => {
 // ================================================================ ΣΤΑΤΙΣΤΙΚΑ ΔΙΑΧΕΙΡΙΣΤΗ
 const KIND = {
   lesson_view: ['👁', 'Άνοιξε μάθημα'], lesson_complete: ['✓', 'Ολοκλήρωσε μάθημα'],
-  material_download: ['📄', 'Κατέβασε αρχείο'], video_open: ['▶', 'Άνοιξε βίντεο'], sim_open: ['◎', 'Άνοιξε προσομοίωση']
+  material_download: ['📄', 'Άνοιξε αρχείο'], video_open: ['▶', 'Άνοιξε βίντεο'], sim_open: ['◎', 'Άνοιξε προσομοίωση']
 };
 const tile = (v, label, sub) => `<div class="tile"><b>${v}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
 const relDay = d => {
@@ -1316,16 +1401,16 @@ route(/^\/admin$/, async tok => {
     ${tile(k.users, 'εγγεγραμμένοι χρήστες', `+${k.new7} τις τελευταίες 7 μέρες`)}
     ${tile(k.active7, 'ενεργοί (7 ημέρες)', 'με τουλάχιστον μία ενέργεια')}
     ${tile(k.completions, 'ολοκληρώσεις μαθημάτων')}
-    ${tile(k.downloads, 'λήψεις αρχείων')}
+    ${tile(k.downloads, 'ανοίγματα αρχείων')}
     ${tile(k.videos, 'ανοίγματα βίντεο')}
     ${tile(k.sims, 'ανοίγματα προσομοιώσεων')}
   </div>
   <div class="panel"><h2>Δραστηριότητα — τελευταίες 30 ημέρες</h2>${dailyChart(o.daily)}</div>
-  <div class="panel"><h2>Ανά μάθημα</h2><div class="tablewrap"><table class="t"><thead><tr><th>Μάθημα</th><th>Ενότητα</th><th class="n">Προβολές</th><th class="n">Μοναδικοί</th><th class="n">Ολοκληρώσεις</th><th class="n">Λήψεις</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody>
+  <div class="panel"><h2>Ανά μάθημα</h2><div class="tablewrap"><table class="t"><thead><tr><th>Μάθημα</th><th>Ενότητα</th><th class="n">Προβολές</th><th class="n">Μοναδικοί</th><th class="n">Ολοκληρώσεις</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody>
     ${o.lessons.map(l => `<tr><td>${esc(l.title)}</td><td class="muted">${esc(l.class_name)}</td><td class="n">${l.views}</td><td class="n">${l.viewers}</td><td class="n">${l.completions}</td><td class="n">${l.downloads}</td><td class="n">${l.videos}</td><td class="n">${l.sims}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Δεν υπάρχουν δημοσιευμένα μαθήματα.</td></tr>'}
   </tbody></table></div></div>
   <div class="panel"><div class="row between"><h2 style="margin:0">Χρήστες (${o.people.length})</h2><input class="inp" id="uq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:280px"></div>
-  <div class="tablewrap" style="margin-top:10px"><table class="t"><thead><tr><th>Όνομα</th><th>Email</th><th>Εγγραφή</th><th>Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Λήψεις</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
+  <div class="tablewrap" style="margin-top:10px"><table class="t"><thead><tr><th>Όνομα</th><th>Email</th><th>Εγγραφή</th><th>Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
     ${o.people.map(p => `<tr class="click" data-u="${p.id}" data-s="${esc((p.full_name + ' ' + p.email).toLowerCase())}"><td>${esc(p.full_name)}</td><td class="muted">${esc(p.email)}</td><td>${fmtDay(p.created_at)}</td><td>${relDay(p.last_activity)}</td><td class="n">${p.completions}</td><td class="n">${p.downloads}</td><td class="n">${p.videos}</td><td class="n">${p.sims}</td></tr>`).join('')}
     ${delAny ? `<tr class="click deleted" data-u="deleted" data-s=""><td colspan="4"><i>Διαγραμμένοι χρήστες (ανώνυμα)</i></td><td class="n">${del.completions}</td><td class="n">${del.downloads}</td><td class="n">${del.videos}</td><td class="n">${del.sims}</td></tr>` : ''}
   </tbody></table></div>
@@ -1335,7 +1420,7 @@ route(/^\/admin$/, async tok => {
   $('#uq').oninput = e => { const v = e.target.value.trim().toLowerCase(); $$('#ub tr').forEach(r => r.hidden = !!v && !(r.dataset.s || '').includes(v)); };
   $('#csvu').onclick = () => {
     const cell = v => { v = String(v ?? ''); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    const rows = [['Όνομα', 'Email', 'Εγγραφή', 'Τελευταία δραστηριότητα', 'Ολοκληρώσεις', 'Λήψεις', 'Βίντεο', 'Προσομοιώσεις']];
+    const rows = [['Όνομα', 'Email', 'Εγγραφή', 'Τελευταία δραστηριότητα', 'Ολοκληρώσεις', 'Αρχεία', 'Βίντεο', 'Προσομοιώσεις']];
     o.people.forEach(p => rows.push([p.full_name, p.email, fmtDay(p.created_at), p.last_activity ? fmtDate(p.last_activity) : '', p.completions, p.downloads, p.videos, p.sims]));
     const blob = new Blob(['﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'academy-xristes.csv'; a.click();
@@ -1353,7 +1438,7 @@ route(/^\/admin\/u\/([\w-]{36}|deleted)$/, async (uid, tok) => {
   app.innerHTML = `<p class="small"><a href="#/admin">← Στατιστικά</a></p>
     <h1>${delUser ? 'Διαγραμμένοι χρήστες (ανώνυμα)' : esc(p ? p.full_name : 'Χρήστης')}</h1>
     ${p ? `<p class="muted">${esc(p.email)} · εγγραφή ${fmtDate(p.created_at)} · τελευταία σύνδεση ${p.last_sign_in_at ? fmtDate(p.last_sign_in_at) : '—'}</p>
-    <div class="tiles">${tile(p.completions, 'ολοκληρώσεις')}${tile(p.downloads, 'λήψεις αρχείων')}${tile(p.videos, 'ανοίγματα βίντεο')}${tile(p.sims, 'ανοίγματα προσομοιώσεων')}</div>` : ''}
+    <div class="tiles">${tile(p.completions, 'ολοκληρώσεις')}${tile(p.downloads, 'ανοίγματα αρχείων')}${tile(p.videos, 'ανοίγματα βίντεο')}${tile(p.sims, 'ανοίγματα προσομοιώσεων')}</div>` : ''}
     <div class="panel"><h2>Χρονολόγιο${ev.length >= 500 ? ' (τελευταίες 500 ενέργειες)' : ''}</h2>
     ${ev.length ? Object.entries(byDay).map(([d, list]) => `<h3 class="day">${d}</h3><ul class="list tl">${list.map(e => `<li class="row">
       <span class="ico">${(KIND[e.kind] || ['•'])[0]}</span><span class="spacer"><b>${(KIND[e.kind] || ['', e.kind])[1]}</b>${e.kind === 'lesson_view' || e.kind === 'lesson_complete' ? '' : `: ${esc(e.label || e.ref || '')}`}
