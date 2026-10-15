@@ -613,7 +613,7 @@ async function tabLessons(c) {
       : `<a class="card ${l === next ? 'next' : ''} ${l.done ? 'done' : ''}" href="#/c/${c.id}/lesson/${l.id}">${inner}</a>`;
   };
   return {
-    html: `${c.mine ? `<div class="row" style="margin-bottom:12px"><button class="btn accent" id="newl">+ Νέο μάθημα</button><button class="btn" id="impl">⧉ Εισαγωγή από άλλη ενότητα</button><span class="muted small">Τα πρόχειρα δεν τα βλέπουν οι χρήστες.${st.learners ? ` · ${st.learners} χρήστες έχουν ολοκληρώσει τουλάχιστον ένα μάθημα.` : ''}</span></div>`
+    html: `${c.mine ? `<div class="row" style="margin-bottom:12px"><button class="btn accent" id="newl">+ Νέο μάθημα</button><button class="btn" id="impl">⧉ Εισαγωγή από άλλη ενότητα</button>${ls.length > 1 ? '<button class="btn" id="reord">↕ Αλλαγή σειράς</button>' : ''}<span class="muted small">Τα πρόχειρα δεν τα βλέπουν οι χρήστες.${st.learners ? ` · ${st.learners} χρήστες έχουν ολοκληρώσει τουλάχιστον ένα μάθημα.` : ''}</span></div>`
       : st.total ? `<div class="panel" style="margin-bottom:14px">${progressBar(st.doneN, st.total, 'Η πρόοδός μου')}
         ${next ? `<div class="row" style="margin-top:10px"><a class="btn accent" href="#/c/${c.id}/lesson/${next.id}">${st.doneN ? 'Συνέχεια' : 'Ξεκινήστε'}: ${esc(next.title)} →</a></div>` : st.doneN === st.total ? '<p style="margin:10px 0 0"><b>🎉 Ολοκληρώσατε όλη την ενότητα!</b></p>' : ''}</div>` : ''}
     <div id="imppanel"></div>
@@ -626,12 +626,49 @@ async function tabLessons(c) {
         catch (er) { toast(errText(er), true); }
       };
       $('#impl').onclick = () => importPanel(c);
+      const ro = $('#reord'); if (ro) ro.onclick = () => reorderPanel(c, ls);
     }
   };
 }
 
+function reorderPanel(c, ls) {
+  const box = $('#imppanel'); if (box.dataset.mode === 'reord' && box.innerHTML) { box.innerHTML = ''; box.dataset.mode = ''; return; }
+  box.dataset.mode = 'reord';
+  let order = ls.map(l => l.id); const byId = Object.fromEntries(ls.map(l => [l.id, l]));
+  box.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Σειρά μαθημάτων</h2>
+    <p class="muted small">Σύρετε κάθε μάθημα στη θέση που θέλετε (ή χρησιμοποιήστε τα βελάκια ▲▼) και πατήστε «Αποθήκευση σειράς». Η αρίθμηση «Μάθημα N» ενημερώνεται αυτόματα.</p>
+    <ol class="reorder" id="rol"></ol>
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="rosave">Αποθήκευση σειράς</button><button class="btn" id="rox">Άκυρο</button><span class="muted small" id="rost"></span></div></div>`;
+  const ol = $('#rol'); let drag = null;
+  const draw = () => {
+    ol.innerHTML = order.map((id, i) => { const l = byId[id]; return `<li draggable="true" data-id="${id}"><span class="grip" aria-hidden="true">⋮⋮</span><span class="ro-n">${i + 1}.</span><span class="ro-t">${esc(l.title)}${l.published ? '' : ' <span class="pill warn">Πρόχειρο</span>'}</span>
+      <button type="button" class="btn small" data-up="${i}" ${i ? '' : 'disabled'} aria-label="Πάνω">▲</button><button type="button" class="btn small" data-dn="${i}" ${i < order.length - 1 ? '' : 'disabled'} aria-label="Κάτω">▼</button></li>`; }).join('');
+    $$('li', ol).forEach(li => {
+      li.ondragstart = e => { drag = li.dataset.id; li.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', drag); };
+      li.ondragend = () => { li.classList.remove('dragging'); $$('li', ol).forEach(x => x.classList.remove('over-top', 'over-bot')); };
+      li.ondragover = e => { if (!drag) return; e.preventDefault(); const r = li.getBoundingClientRect(), top = e.clientY < r.top + r.height / 2;
+        $$('li', ol).forEach(x => x.classList.remove('over-top', 'over-bot')); li.classList.add(top ? 'over-top' : 'over-bot'); };
+      li.ondrop = e => { e.preventDefault(); if (!drag || drag === li.dataset.id) return; const r = li.getBoundingClientRect(), top = e.clientY < r.top + r.height / 2;
+        order = order.filter(x => x !== drag); let j = order.indexOf(li.dataset.id) + (top ? 0 : 1); order.splice(j, 0, drag); drag = null; draw(); };
+    });
+    $$('[data-up]', ol).forEach(b => b.onclick = () => { const i = +b.dataset.up; [order[i - 1], order[i]] = [order[i], order[i - 1]]; draw(); ol.querySelector(`[data-up="${i - 1}"]`)?.focus(); });
+    $$('[data-dn]', ol).forEach(b => b.onclick = () => { const i = +b.dataset.dn; [order[i + 1], order[i]] = [order[i], order[i + 1]]; draw(); ol.querySelector(`[data-dn="${i + 1}"]`)?.focus(); });
+  };
+  draw();
+  $('#rox').onclick = () => { box.innerHTML = ''; box.dataset.mode = ''; };
+  $('#rosave').onclick = async () => {
+    const btn = $('#rosave'); btn.disabled = true; $('#rost').textContent = 'Αποθήκευση…';
+    try {
+      const ch = order.map((id, i) => ({ id, pos: i + 1 })).filter(x => byId[x.id].position !== x.pos);
+      for (const x of ch) await q(sb.from('lessons').update({ position: x.pos }).eq('id', x.id));
+      toast(ch.length ? 'Η σειρά αποθηκεύτηκε.' : 'Καμία αλλαγή.'); box.dataset.mode = ''; render();
+    } catch (er) { btn.disabled = false; $('#rost').textContent = ''; toast(errText(er), true); }
+  };
+}
+
 async function importPanel(c) {
-  const box = $('#imppanel'); if (box.innerHTML) { box.innerHTML = ''; return; }
+  const box = $('#imppanel'); if (box.innerHTML && box.dataset.mode !== 'reord') { box.innerHTML = ''; box.dataset.mode = ''; return; }
+  box.dataset.mode = 'imp';
   const others = await myOtherClasses(c.id);
   if (!others.length) { box.innerHTML = msgBox('info', 'Δεν έχετε άλλες ενότητες για εισαγωγή.') + '<div style="height:12px"></div>'; return; }
   const ls = await q(sb.from('lessons').select('id,class_id,title,position,published').in('class_id', others.map(o => o.id)).order('position').order('created_at'));
