@@ -194,3 +194,4 @@ h3.day{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing
 .fname:hover{text-decoration:underline}
 .fsize{font-size:12px;color:var(--muted);white-space:nowrap}
 @media (max-width:820px){.lesson-two>.stack:last-child{order:-1}}
+.impcls{border:1px solid var(--line-2);border-radius:10px;padding:8px 12px;margin:8px 0}.impcls summary{cursor:pointer}.impcls .chk{display:flex;gap:8px;margin:4px 0}

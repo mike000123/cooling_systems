@@ -562,6 +562,31 @@ route(/^\/c\/([\w-]{36})(?:\/(asg|ann|students|settings))?$/, async (cid, tab, t
   body.bind && body.bind();
 });
 
+// ================================================================ ΑΝΤΙΓΡΑΦΗ ΜΑΘΗΜΑΤΩΝ / ΕΝΟΤΗΤΩΝ
+// Αντιγράφει μαθήματα (με τα αρχεία τους) σε άλλη ενότητα. Τα αντίγραφα μπαίνουν στο τέλος, με την ίδια σειρά.
+async function copyLessons(lessonIds, targetCid, publish, onProgress) {
+  if (!lessonIds.length) return 0;
+  const src = await q(sb.from('lessons').select('*').in('id', lessonIds).order('position').order('created_at'));
+  const last = await q(sb.from('lessons').select('position').eq('class_id', targetCid).order('position', { ascending: false }).limit(1));
+  let pos = last.length ? (last[0].position || 0) : 0, n = 0;
+  for (const l of src) {
+    onProgress && onProgress(`Αντιγραφή: ${l.title}…`);
+    const nl = await q(sb.from('lessons').insert({ class_id: targetCid, position: ++pos, title: l.title, summary: l.summary, videos: l.videos,
+      recap_videos: l.recap_videos || [], sims: l.sims, quiz: l.quiz, published: !!publish }).select().single());
+    const mats = await q(sb.from('materials').select('*').eq('item_id', l.id).order('created_at'));
+    for (const m of mats) {
+      const path = `${targetCid}/${nl.id}/${m.path.split('/').pop()}`;
+      await q(sb.storage.from('materials').copy(m.path, path));
+      await q(sb.from('materials').insert({ class_id: targetCid, item_id: nl.id, title: m.title, path, size: m.size }));
+    }
+    n++;
+  }
+  return n;
+}
+async function myOtherClasses(exceptId) {
+  return (await q(sb.from('classes').select('id,name,archived').eq('owner', me.id).order('created_at'))).filter(x => x.id !== exceptId);
+}
+
 async function tabLessons(c) {
   const st = await lessonState(c), ls = st.ls;
   const next = ls.find(l => l.published && !l.done && !l.locked);
@@ -575,9 +600,10 @@ async function tabLessons(c) {
       : `<a class="card ${l === next ? 'next' : ''} ${l.done ? 'done' : ''}" href="#/c/${c.id}/lesson/${l.id}">${inner}</a>`;
   };
   return {
-    html: `${c.mine ? `<div class="row" style="margin-bottom:12px"><button class="btn accent" id="newl">+ Νέο μάθημα</button><span class="muted small">Τα πρόχειρα δεν τα βλέπουν οι χρήστες.${st.learners ? ` · ${st.learners} χρήστες έχουν ολοκληρώσει τουλάχιστον ένα μάθημα.` : ''}</span></div>`
+    html: `${c.mine ? `<div class="row" style="margin-bottom:12px"><button class="btn accent" id="newl">+ Νέο μάθημα</button><button class="btn" id="impl">⧉ Εισαγωγή από άλλη ενότητα</button><span class="muted small">Τα πρόχειρα δεν τα βλέπουν οι χρήστες.${st.learners ? ` · ${st.learners} χρήστες έχουν ολοκληρώσει τουλάχιστον ένα μάθημα.` : ''}</span></div>`
       : st.total ? `<div class="panel" style="margin-bottom:14px">${progressBar(st.doneN, st.total, 'Η πρόοδός μου')}
         ${next ? `<div class="row" style="margin-top:10px"><a class="btn accent" href="#/c/${c.id}/lesson/${next.id}">${st.doneN ? 'Συνέχεια' : 'Ξεκινήστε'}: ${esc(next.title)} →</a></div>` : st.doneN === st.total ? '<p style="margin:10px 0 0"><b>🎉 Ολοκληρώσατε όλη την ενότητα!</b></p>' : ''}</div>` : ''}
+    <div id="imppanel"></div>
     ${ls.length ? `<div class="grid">${ls.map(card).join('')}</div>`
       : `<div class="empty">${c.mine ? 'Δεν υπάρχουν μαθήματα ακόμη.' : 'Δεν υπάρχουν ακόμη μαθήματα σε αυτή την ενότητα.'}</div>`}`,
     bind: () => {
@@ -586,7 +612,32 @@ async function tabLessons(c) {
         try { const l = await q(sb.from('lessons').insert({ class_id: c.id, title: 'Νέο μάθημα', position: ls.length + 1 }).select().single()); go(`#/c/${c.id}/lesson/${l.id}/edit`); }
         catch (er) { toast(errText(er), true); }
       };
+      $('#impl').onclick = () => importPanel(c);
     }
+  };
+}
+
+async function importPanel(c) {
+  const box = $('#imppanel'); if (box.innerHTML) { box.innerHTML = ''; return; }
+  const others = await myOtherClasses(c.id);
+  if (!others.length) { box.innerHTML = msgBox('info', 'Δεν έχετε άλλες ενότητες για εισαγωγή.') + '<div style="height:12px"></div>'; return; }
+  const ls = await q(sb.from('lessons').select('id,class_id,title,position,published').in('class_id', others.map(o => o.id)).order('position').order('created_at'));
+  box.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Εισαγωγή μαθημάτων από άλλη ενότητα</h2>
+    <p class="muted small">Επιλέξτε μαθήματα. Αντιγράφονται με όλο το περιεχόμενο (σύνοψη, βίντεο, προσομοιώσεις, αυτοέλεγχο, αρχεία) στο τέλος αυτής της ενότητας. Τα πρωτότυπα δεν αλλάζουν.</p>
+    ${others.map(o => { const mine = ls.filter(l => l.class_id === o.id); return `<details class="impcls" ${others.length === 1 ? 'open' : ''}><summary><b>${esc(o.name)}</b> <span class="muted small">(${mine.length} μαθήματα)</span></summary>
+      ${mine.length ? `<label class="chk small" style="margin:6px 0"><input type="checkbox" data-all="${o.id}"> <b>Όλα</b></label>
+      ${mine.map((l, i) => `<label class="chk"><input type="checkbox" name="impl" value="${l.id}" data-cls="${o.id}"> <span>${i + 1}. ${esc(l.title)}${l.published ? '' : ' <span class="pill warn">Πρόχειρο</span>'}</span></label>`).join('')}`
+        : '<p class="muted small">Χωρίς μαθήματα.</p>'}</details>`; }).join('')}
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="imppub"> <span>Δημοσίευση αμέσως (αλλιώς μπαίνουν ως πρόχειρα για έλεγχο)</span></label>
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="impgo">Αντιγραφή επιλεγμένων</button><button class="btn" id="impx">Άκυρο</button><span class="muted small" id="impst"></span></div></div>`;
+  $$('[data-all]', box).forEach(a => a.onchange = () => $$(`input[data-cls="${a.dataset.all}"]`, box).forEach(x => x.checked = a.checked));
+  $('#impx').onclick = () => box.innerHTML = '';
+  $('#impgo').onclick = async () => {
+    const ids = $$('input[name=impl]:checked', box).map(x => x.value);
+    if (!ids.length) return toast('Επιλέξτε τουλάχιστον ένα μάθημα.', true);
+    const btn = $('#impgo'); btn.disabled = true;
+    try { const n = await copyLessons(ids, c.id, $('#imppub').checked, t => $('#impst').textContent = t); toast(`Αντιγράφηκαν ${n} μαθήματα.`); render(); }
+    catch (er) { toast(errText(er), true); btn.disabled = false; $('#impst').textContent = ''; }
   };
 }
 
@@ -696,6 +747,9 @@ async function tabSettings(c) {
       <label class="chk"><input type="checkbox" name="seq" ${c.sequential ? 'checked' : ''}> <span>Διαδοχικά μαθήματα: κάθε μάθημα ξεκλειδώνει όταν ολοκληρωθεί το προηγούμενο</span></label>
       <label class="chk"><input type="checkbox" name="arch" ${c.archived ? 'checked' : ''}> <span>Αρχειοθετημένο (οι χρήστες δεν έχουν πλέον πρόσβαση· εσείς κρατάτε όλο το υλικό)</span></label>
       <div><button class="btn primary">Αποθήκευση</button></div></form></div>
+      <div class="panel" style="max-width:680px"><h2>Αντίγραφο ενότητας</h2>
+      <p class="small">Δημιουργεί νέα ενότητα με τις ίδιες ρυθμίσεις και αντίγραφα όλων των μαθημάτων και των αρχείων τους (π.χ. για άλλο μάθημα με παρόμοια ύλη). Τα αντίγραφα μπαίνουν ως πρόχειρα, για να τα ελέγξετε πριν τα δημοσιεύσετε.</p>
+      <form class="row" id="fdup"><input class="inp" name="dname" value="${esc(c.name)} (αντίγραφο)" maxlength="120" style="flex:1;min-width:220px"><button class="btn">⧉ Δημιουργία αντιγράφου</button></form><p class="muted small" id="dupst"></p></div>
       <div class="panel" style="max-width:680px"><h2>Διαγραφή ενότητας</h2>
       <p class="small">Διαγράφονται οριστικά όλα τα μαθήματα, οι εργασίες, οι υποβολές, τα αρχεία και τα μηνύματα της ενότητας.</p>
       <button class="btn danger" id="delc">Διαγραφή ενότητας</button></div>`,
@@ -704,6 +758,16 @@ async function tabSettings(c) {
         e.preventDefault(); const f = e.target;
         try { await q(sb.from('classes').update({ name: f.elements.namedItem('name').value.trim(), description: f.desc.value.trim(), is_open: f.open.checked, sequential: f.seq.checked, archived: f.arch.checked }).eq('id', c.id)); toast('Αποθηκεύτηκε.'); render(); }
         catch (er) { toast(errText(er), true); }
+      };
+      $('#fdup').onsubmit = async e => {
+        e.preventDefault(); const name = e.target.dname.value.trim(); if (!name) return;
+        const btn = $('button', e.target); btn.disabled = true;
+        try {
+          const nc = await q(sb.from('classes').insert({ name, description: c.description, is_open: c.is_open, sequential: c.sequential, owner: me.id }).select().single());
+          const ids = (await q(sb.from('lessons').select('id').eq('class_id', c.id))).map(x => x.id);
+          const n = await copyLessons(ids, nc.id, false, t => $('#dupst').textContent = t);
+          toast(`Δημιουργήθηκε η «${name}» με ${n} μαθήματα (πρόχειρα).`); go('#/c/' + nc.id);
+        } catch (er) { toast(errText(er), true); btn.disabled = false; $('#dupst').textContent = ''; }
       };
       $('#delc').onclick = async () => {
         const t = prompt(`Για επιβεβαίωση γράψτε τον τίτλο της ενότητας:\n${c.name}`);
@@ -863,7 +927,8 @@ function lessonEdit(c, l, mats) {
     <label>Ερωτήσεις αυτοελέγχου<textarea name="quiz" style="min-height:160px" placeholder="? Πόση πίεση ασκούν 10 m νερού;\n- 0,1 bar\n* 1 bar\n- 10 bar\n> p = ρ·g·h ≈ 998·9,81·10 Pa ≈ 0,98 bar">${esc(l.quiz)}</textarea>
       <span class="hint">«?» ερώτηση · «-» λάθος επιλογή · «*» σωστή · «>» επεξήγηση (προαιρετική). Οι απαντήσεις δεν αποθηκεύονται.</span></label>
     <label class="chk"><input type="checkbox" name="pub" ${l.published ? 'checked' : ''}> <span>Δημοσιευμένο (ορατό στους χρήστες)</span></label>
-    <div class="row"><button class="btn primary">Αποθήκευση</button><span class="spacer"></span><button type="button" class="btn danger" id="dell">Διαγραφή μαθήματος</button></div>
+    <div class="row"><button class="btn primary">Αποθήκευση</button><span class="spacer"></span><button type="button" class="btn" id="copyl">⧉ Αντιγραφή σε άλλη ενότητα</button><button type="button" class="btn danger" id="dell">Διαγραφή μαθήματος</button></div>
+    <div id="copybox"></div>
   </form><div class="stack"><div class="panel"><h2>Υλικό (φύλλα εργασίας κ.λπ.)</h2>
     <p class="muted small">Ιδιωτικά αρχεία: τα βλέπουν μόνο όσοι έχουν πρόσβαση στην ενότητα, όταν το μάθημα είναι δημοσιευμένο. Έως 20 MB το καθένα.</p>
     <div id="mats">${materialsList(mats, true)}</div><div style="margin-top:8px">${uploadBox()}</div></div>
@@ -880,6 +945,20 @@ function lessonEdit(c, l, mats) {
         videos: vids, recap_videos: recap.map(v => 'https://www.youtube.com/watch?v=' + ytId(v)), sims: $$('input[name=sim]:checked', f).map(x => x.value), quiz: f.quiz.value, published: f.pub.checked }).eq('id', l.id));
       toast('Αποθηκεύτηκε.'); go(`#/c/${c.id}/lesson/${l.id}`);
     } catch (er) { toast(errText(er), true); }
+  };
+  $('#copyl').onclick = async () => {
+    const box = $('#copybox'); if (box.innerHTML) { box.innerHTML = ''; return; }
+    const others = await myOtherClasses(c.id);
+    if (!others.length) { box.innerHTML = msgBox('info', 'Δεν έχετε άλλη ενότητα. Φτιάξτε πρώτα μία από «Οι ενότητές μου».'); return; }
+    box.innerHTML = `<div class="msg info" style="margin-top:12px"><div class="row"><span>Αντιγραφή του μαθήματος (με τα αρχεία του) στην ενότητα:</span>
+      <select class="inp" id="copyto" style="max-width:280px">${others.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('')}</select>
+      <button type="button" class="btn primary small" id="copygo">Αντιγραφή</button></div>
+      <p class="small" style="margin:6px 0 0">Αποθηκεύστε πρώτα τυχόν αλλαγές. Το αντίγραφο μπαίνει ως πρόχειρο στο τέλος της ενότητας.</p></div>`;
+    $('#copygo').onclick = async () => {
+      const to = $('#copyto').value; $('#copygo').disabled = true;
+      try { await copyLessons([l.id], to, false); toast('Αντιγράφηκε.'); go('#/c/' + to); }
+      catch (er) { toast(errText(er), true); $('#copygo').disabled = false; }
+    };
   };
   $('#dell').onclick = async () => {
     if (!confirm('Οριστική διαγραφή μαθήματος και των αρχείων του;')) return;
