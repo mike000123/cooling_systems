@@ -157,7 +157,7 @@ function loadPdfJs() {
   });
   return pdfjsP || (pdfjsP = one(srcs[0]).catch(() => one(srcs[1])).catch(() => { pdfjsP = null; throw new Error('Δεν φορτώθηκε ο προβολέας PDF. Ελέγξτε τη σύνδεση και δοκιμάστε ξανά.'); }));
 }
-const wmText = () => [me && me.full_name, session && session.user && session.user.email].filter(Boolean).join(' · ');
+const wmText = () => 'CoolingSystemsLab';
 function drawWatermark(ctx, w, h, text) {
   if (!text) return;
   const fs = Math.max(13, Math.round(w / 38));
@@ -255,7 +255,7 @@ async function render() {
     const m = h.match(re);
     if (m) {
       if (session && me) refreshUnread().catch(() => {});
-      try { await fn(...m.slice(1).map(x => x && decodeURIComponent(x)), tok); bindPreview(); }
+      try { await fn(...m.slice(1).map(x => x && decodeURIComponent(x)), tok); bindPreview(); if (tok === navToken) GC.page(h); }
       catch (e) { console.error(e); if (tok === navToken) app.innerHTML = msgBox('err', esc(errText(e))) + `<p><a href="#/">← Αρχική</a></p>`; }
       window.scrollTo(0, 0);
       return;
@@ -651,8 +651,36 @@ function progressBar(done, total, label) {
 }
 const QUIZ_PASS = 0.7;   // ποσοστό σωστών για ολοκλήρωση μαθήματος με κουίζ
 // καταγραφή δραστηριότητας χρήστη (όχι του διαχειριστή) — αθόρυβα, χωρίς να σταματά τη σελίδα
+// ---------------------------------------------------------------- GoatCounter (ανώνυμα συνολικά στατιστικά, όπως στο κυρίως site)
+// Δεν στέλνει ποτέ όνομα, email ή αναγνωριστικό χρήστη· ο διαχειριστής δεν μετριέται.
+const GC = {
+  q: [], tries: 0, timer: null, last: '',
+  send(o) {
+    if (!document.querySelector('script[data-goatcounter]') || isTeacher()) return;
+    this.q.push(o); this.flush();
+  },
+  flush() {
+    const gc = window.goatcounter;
+    if (gc && gc.count) { while (this.q.length) { try { gc.count(this.q.shift()); } catch {} } return; }
+    if (this.timer || this.tries > 40) return;
+    this.tries++; this.timer = setTimeout(() => { this.timer = null; this.flush(); }, 750);
+  },
+  page(h) {
+    // μόνο δημόσιες σελίδες περιεχομένου· όχι λογαριασμός, διαχείριση, επεξεργασία
+    if (/^\/(profile|admin|new-class|deleted)|\/(edit|settings|students|grade)$/.test(h)) return;
+    const path = '/academy' + h;
+    if (path === this.last) return; this.last = path;
+    // τίτλος μόνο από ενότητες/μαθήματα (ποτέ από σελίδες που μπορεί να δείχνουν το όνομα του χρήστη)
+    const t = h.startsWith('/c/') ? (($('#app h1') || {}).textContent || '').trim() : ({ '/': 'αρχική', '/login': 'σύνδεση', '/register': 'εγγραφή', '/forgot': 'ξέχασα τον κωδικό' })[h] || '';
+    this.send({ path, title: 'Academy' + (t ? ': ' + t : '') });
+  },
+  event(kind, label) { this.send({ path: `academy-${kind}: ${label || ''}`.slice(0, 200), title: label || kind, event: true }); }
+};
+const GC_KIND = { material_download: 'αρχείο', video_open: 'βίντεο', sim_open: 'προσομοίωση', lesson_complete: 'ολοκλήρωση' };
+
 function track(c, lessonId, kind, ref, label) {
   if (!c || c.owner_me || !session) return;
+  if (GC_KIND[kind]) GC.event(GC_KIND[kind], label);
   sb.from('activity_events').insert({ lesson_id: lessonId, class_id: c.id, kind, ref: ref || null, label: label || null }).then(() => {}, () => {});
 }
 function classHead(c, tab) {
@@ -990,7 +1018,7 @@ function materialsList(mats, canEdit, owner) {
       ${!canEdit && view && m.allow_download ? `<button class="fdl" data-dlonly="${esc(m.path)}" data-title="${esc(m.title)}" title="Λήψη: ${esc(m.title)}" aria-label="Λήψη: ${esc(m.title)}">⬇</button>` : ''}
       ${canEdit ? `<label class="fallow" title="Επιτρέπεται στους χρήστες να το κατεβάσουν"><input type="checkbox" data-allow="${m.id}" ${m.allow_download ? 'checked' : ''}> Λήψη</label><button class="btn small danger" data-delmat="${m.id}" data-path="${esc(m.path)}">Αφαίρεση</button>` : ''}</li>`; }).join('')}</ul>
     ${anyHidden ? `<p class="small" style="color:#a3513f;margin:6px 0 0">⚠ Τα αρχεία Word/PowerPoint κ.λπ. δεν προβάλλονται στον browser. Ανεβάστε τα ως PDF ή τσεκάρετε «Λήψη».</p>` : ''}
-    ${canEdit ? '<p class="muted small" style="margin:6px 0 0">Τα αρχεία ανοίγουν σε προβολή μόνο για ανάγνωση, με υδατογράφημα το email του χρήστη. Με «Λήψη» επιτρέπεται και το κατέβασμα.</p>' : ''}`;
+    ${canEdit ? '<p class="muted small" style="margin:6px 0 0">Τα αρχεία ανοίγουν σε προβολή μόνο για ανάγνωση, με υδατογράφημα «CoolingSystemsLab». Με «Λήψη» επιτρέπεται και το κατέβασμα.</p>' : ''}`;
 }
 function bindMaterials(cid, itemId, canEdit, onOpen, owner) {
   const box = $('#mats');
