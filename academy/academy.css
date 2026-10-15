@@ -204,3 +204,6 @@ h3.day{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing
 .reorder .ro-n{color:#6b7785;min-width:2.2em;text-align:right;font-variant-numeric:tabular-nums}
 .reorder .ro-t{flex:1;min-width:0}
 .reorder .btn.small{padding:3px 8px}
+.reorder li.del{background:#fdf0ee;border-color:#f3c4bb}
+.reorder li.del .ro-t{text-decoration:line-through;color:#a3513f}
+.reorder .ro-del:hover{background:#fdecea;border-color:#e8a597}

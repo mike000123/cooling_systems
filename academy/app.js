@@ -634,15 +634,19 @@ async function tabLessons(c) {
 function reorderPanel(c, ls) {
   const box = $('#imppanel'); if (box.dataset.mode === 'reord' && box.innerHTML) { box.innerHTML = ''; box.dataset.mode = ''; return; }
   box.dataset.mode = 'reord';
-  let order = ls.map(l => l.id); const byId = Object.fromEntries(ls.map(l => [l.id, l]));
+  let order = ls.map(l => l.id); const byId = Object.fromEntries(ls.map(l => [l.id, l])); const del = new Set();
   box.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Σειρά μαθημάτων</h2>
-    <p class="muted small">Σύρετε κάθε μάθημα στη θέση που θέλετε (ή χρησιμοποιήστε τα βελάκια ▲▼) και πατήστε «Αποθήκευση σειράς». Η αρίθμηση «Μάθημα N» ενημερώνεται αυτόματα.</p>
+    <p class="muted small">Σύρετε κάθε μάθημα στη θέση που θέλετε (ή χρησιμοποιήστε τα βελάκια ▲▼). Με 🗑 σημειώνετε μαθήματα για διαγραφή (↶ για αναίρεση). Τίποτα δεν αλλάζει πριν πατήσετε «Αποθήκευση». Η αρίθμηση «Μάθημα N» ενημερώνεται αυτόματα.</p>
     <ol class="reorder" id="rol"></ol>
-    <div class="row" style="margin-top:10px"><button class="btn primary" id="rosave">Αποθήκευση σειράς</button><button class="btn" id="rox">Άκυρο</button><span class="muted small" id="rost"></span></div></div>`;
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="rosave">Αποθήκευση</button><button class="btn" id="rox">Άκυρο</button><span class="muted small" id="rost"></span></div></div>`;
   const ol = $('#rol'); let drag = null;
   const draw = () => {
-    ol.innerHTML = order.map((id, i) => { const l = byId[id]; return `<li draggable="true" data-id="${id}"><span class="grip" aria-hidden="true">⋮⋮</span><span class="ro-n">${i + 1}.</span><span class="ro-t">${esc(l.title)}${l.published ? '' : ' <span class="pill warn">Πρόχειρο</span>'}</span>
-      <button type="button" class="btn small" data-up="${i}" ${i ? '' : 'disabled'} aria-label="Πάνω">▲</button><button type="button" class="btn small" data-dn="${i}" ${i < order.length - 1 ? '' : 'disabled'} aria-label="Κάτω">▼</button></li>`; }).join('');
+    let k = 0;
+    ol.innerHTML = order.map((id, i) => { const l = byId[id], d = del.has(id); return `<li draggable="true" data-id="${id}" class="${d ? 'del' : ''}"><span class="grip" aria-hidden="true">⋮⋮</span><span class="ro-n">${d ? '' : ++k + '.'}</span><span class="ro-t">${esc(l.title)}${l.published ? '' : ' <span class="pill warn">Πρόχειρο</span>'}</span>
+      <button type="button" class="btn small" data-up="${i}" ${i ? '' : 'disabled'} aria-label="Πάνω">▲</button><button type="button" class="btn small" data-dn="${i}" ${i < order.length - 1 ? '' : 'disabled'} aria-label="Κάτω">▼</button>${d ? `<button type="button" class="btn small" data-undel="${id}" title="Αναίρεση διαγραφής" aria-label="Αναίρεση διαγραφής">↶</button>` : `<button type="button" class="btn small ro-del" data-del="${id}" title="Διαγραφή μαθήματος" aria-label="Διαγραφή μαθήματος">🗑</button>`}</li>`; }).join('');
+    $$('[data-del]', ol).forEach(b => b.onclick = () => { del.add(b.dataset.del); draw(); });
+    $$('[data-undel]', ol).forEach(b => b.onclick = () => { del.delete(b.dataset.undel); draw(); });
+    $('#rosave').textContent = del.size ? `Αποθήκευση (διαγραφή ${del.size})` : 'Αποθήκευση';
     $$('li', ol).forEach(li => {
       li.ondragstart = e => { drag = li.dataset.id; li.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', drag); };
       li.ondragend = () => { li.classList.remove('dragging'); $$('li', ol).forEach(x => x.classList.remove('over-top', 'over-bot')); };
@@ -657,11 +661,18 @@ function reorderPanel(c, ls) {
   draw();
   $('#rox').onclick = () => { box.innerHTML = ''; box.dataset.mode = ''; };
   $('#rosave').onclick = async () => {
+    if (del.size && !confirm(`Οριστική διαγραφή ${del.size} μαθήματος/ων μαζί με τα αρχεία τους;\n\n${[...del].map(id => '• ' + byId[id].title).join('\n')}`)) return;
     const btn = $('#rosave'); btn.disabled = true; $('#rost').textContent = 'Αποθήκευση…';
     try {
-      const ch = order.map((id, i) => ({ id, pos: i + 1 })).filter(x => byId[x.id].position !== x.pos);
+      for (const id of del) {
+        const mats = await q(sb.from('materials').select('path').eq('item_id', id));
+        if (mats.length) await sb.storage.from('materials').remove(mats.map(m => m.path));
+        await q(sb.from('materials').delete().eq('item_id', id));
+        await q(sb.from('lessons').delete().eq('id', id));
+      }
+      const ch = order.filter(id => !del.has(id)).map((id, i) => ({ id, pos: i + 1 })).filter(x => byId[x.id].position !== x.pos);
       for (const x of ch) await q(sb.from('lessons').update({ position: x.pos }).eq('id', x.id));
-      toast(ch.length ? 'Η σειρά αποθηκεύτηκε.' : 'Καμία αλλαγή.'); box.dataset.mode = ''; render();
+      toast(del.size ? `Διαγράφηκαν ${del.size} μαθήματα. Η σειρά αποθηκεύτηκε.` : ch.length ? 'Η σειρά αποθηκεύτηκε.' : 'Καμία αλλαγή.'); box.dataset.mode = ''; render();
     } catch (er) { btn.disabled = false; $('#rost').textContent = ''; toast(errText(er), true); }
   };
 }
