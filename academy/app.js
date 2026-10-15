@@ -94,9 +94,8 @@ function videoCards(list) {
 function recapCards(list) {
   const v = (list || []).map(u => ytId(u)).filter(Boolean);
   if (!v.length) return '';
-  return `<div class="recaps">${v.map((id, i) => `<a class="recap" href="https://www.youtube.com/watch?v=${id}" target="_blank" rel="noopener">
-    <span class="rthumb"><img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt="" loading="lazy"><i>▶</i></span>
-    <span class="rtxt"><b>Ανασκόπηση μαθήματος${v.length > 1 ? ' ' + (i + 1) : ''}</b><small>Βίντεο ~10 λεπτών · άνοιγμα στο YouTube</small></span></a>`).join('')}</div>`;
+  return `<div class="recaps">${v.map((id, i) => `<a class="recap" href="https://www.youtube.com/watch?v=${id}" target="_blank" rel="noopener" title="Ανασκόπηση μαθήματος${v.length > 1 ? ' ' + (i + 1) : ''} — άνοιγμα στο YouTube" aria-label="Ανασκόπηση μαθήματος${v.length > 1 ? ' ' + (i + 1) : ''} στο YouTube">
+    <img src="https://i.ytimg.com/vi/${id}/maxresdefault.jpg" alt="" loading="lazy" onload="if(this.naturalWidth<200)this.src='https://i.ytimg.com/vi/${id}/mqdefault.jpg'" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${id}/mqdefault.jpg'"><i aria-hidden="true"></i></a>`).join('')}</div>`;
 }
 
 // ---------------------------------------------------------------- κουίζ αυτοελέγχου
@@ -725,10 +724,16 @@ async function tabSettings(c) {
 }
 
 // ================================================================ ΥΛΙΚΟ (αρχεία)
+const EXT_COL = { pdf: '#D23A3A', ppt: '#E2672B', pptx: '#E2672B', doc: '#2B6CB0', docx: '#2B6CB0', xls: '#1C9A68', xlsx: '#1C9A68', zip: '#586C7D' };
 function materialsList(mats, canEdit) {
   if (!mats.length) return canEdit ? `<p class="muted small">Κανένα αρχείο.</p>` : '';
-  return `<ul class="list">${mats.map(m => `<li class="row"><span class="spacer">📄 <button class="link" data-open="${esc(m.path)}">${esc(m.title)}</button> <span class="muted small">${fmtSize(m.size)}</span></span>
-    ${canEdit ? `<button class="btn small danger" data-delmat="${m.id}" data-path="${esc(m.path)}">Αφαίρεση</button>` : ''}</li>`).join('')}</ul>`;
+  return `<ul class="files">${mats.map(m => {
+    const ext = ((m.title.match(/\.(\w{2,4})$/) || [])[1] || 'file').toLowerCase();
+    const name = m.title.replace(/\.\w{2,4}$/, '');
+    return `<li><span class="fext" style="background:${EXT_COL[ext] || '#586C7D'}">${esc(ext.slice(0, 4).toUpperCase())}</span>
+      <button class="fname" data-open="${esc(m.path)}" title="Λήψη: ${esc(m.title)}">${esc(name)}</button>
+      <span class="fsize">${fmtSize(m.size)}</span>
+      ${canEdit ? `<button class="btn small danger" data-delmat="${m.id}" data-path="${esc(m.path)}">Αφαίρεση</button>` : ''}</li>`; }).join('')}</ul>`;
 }
 function bindMaterials(cid, itemId, canEdit, onOpen) {
   const box = $('#mats');
