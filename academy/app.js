@@ -79,14 +79,24 @@ const simHref = key => (CFG.siteUrl || '../') + '#' + key;
 
 // ---------------------------------------------------------------- YouTube
 function ytId(u) {
-  const m = String(u).match(/(?:youtu\.be\/|v=|shorts\/|embed\/|live\/)([\w-]{11})/);
+  const m = String(u).match(/(?:youtu\.be\/|v=|shorts\/|embed\/|live\/|studio\.youtube\.com\/video\/)([\w-]{11})/);
   return m ? m[1] : null;
 }
 function videoCards(list) {
   const v = (list || []).map(u => ({ u, id: ytId(u) })).filter(x => x.id);
   if (!v.length) return '';
+  // πάντα δημόσιος σύνδεσμος (ένας σύνδεσμος Studio ανοίγει μόνο για τον ιδιοκτήτη)
+  v.forEach(x => { if (/studio\.youtube|embed\//.test(x.u)) x.u = 'https://www.youtube.com/watch?v=' + x.id; });
   return `<div class="vids">${v.map(x => `<a class="vid" href="${esc(x.u)}" target="_blank" rel="noopener">
     <img src="https://i.ytimg.com/vi/${x.id}/mqdefault.jpg" alt="" loading="lazy"><span>▶ Άνοιγμα στο YouTube</span></a>`).join('')}</div>`;
+}
+
+function recapCards(list) {
+  const v = (list || []).map(u => ytId(u)).filter(Boolean);
+  if (!v.length) return '';
+  return `<div class="recaps">${v.map((id, i) => `<a class="recap" href="https://www.youtube.com/watch?v=${id}" target="_blank" rel="noopener">
+    <span class="rthumb"><img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt="" loading="lazy"><i>▶</i></span>
+    <span class="rtxt"><b>Ανασκόπηση μαθήματος${v.length > 1 ? ' ' + (i + 1) : ''}</b><small>Βίντεο ~10 λεπτών · άνοιγμα στο YouTube</small></span></a>`).join('')}</div>`;
 }
 
 // ---------------------------------------------------------------- κουίζ αυτοελέγχου
@@ -500,7 +510,7 @@ async function loadClass(cid) {
 }
 // μαθήματα όπως τα βλέπει ο χρήστης + πρόοδος + ποια είναι κλειδωμένα
 async function lessonState(c) {
-  let ls = await q(sb.from('lessons').select('id,title,summary,position,published,videos,sims,quiz').eq('class_id', c.id).order('position').order('created_at'));
+  let ls = await q(sb.from('lessons').select('id,title,summary,position,published,videos,recap_videos,sims,quiz').eq('class_id', c.id).order('position').order('created_at'));
   if (!c.mine) ls = ls.filter(l => l.published);
   const prog = await q(sb.from('lesson_progress').select('lesson_id,score,completed_at,user_id').eq('class_id', c.id));
   const mineP = prog.filter(p => p.user_id === me.id);
@@ -557,7 +567,7 @@ async function tabLessons(c) {
   const st = await lessonState(c), ls = st.ls;
   const next = ls.find(l => l.published && !l.done && !l.locked);
   const card = (l, i) => {
-    const meta = `<div class="row small muted" style="margin-top:8px">${l.videos.length ? `<span>▶ ${l.videos.length} βίντεο</span>` : ''}${l.sims.length ? `<span>◎ ${l.sims.length} προσομοιώσεις</span>` : ''}${parseQuiz(l.quiz).length ? `<span>✎ αυτοέλεγχος</span>` : ''}</div>`;
+    const meta = `<div class="row small muted" style="margin-top:8px">${(l.recap_videos || []).length ? '<span>🎬 ανασκόπηση</span>' : ''}${l.videos.length ? `<span>▶ ${l.videos.length} βίντεο</span>` : ''}${l.sims.length ? `<span>◎ ${l.sims.length} προσομοιώσεις</span>` : ''}${parseQuiz(l.quiz).length ? `<span>✎ αυτοέλεγχος</span>` : ''}</div>`;
     const status = c.mine ? (!l.published ? '<span class="pill warn">Πρόχειρο</span>' : `<span class="pill">${l.completions} ολοκλήρωσαν</span>`)
       : l.done ? '<span class="pill ok">✓ Ολοκληρώθηκε</span>' : l.locked ? '<span class="pill">🔒 Κλειδωμένο</span>' : l === next ? '<span class="pill info">Επόμενο</span>' : '';
     const inner = `<div class="row between"><span class="muted small">Μάθημα ${i + 1}</span>${status}</div>
@@ -792,19 +802,20 @@ route(/^\/c\/([\w-]{36})\/lesson\/([\w-]{36})(\/edit)?$/, async (cid, lid, edit,
     ${!c.mine && st.total ? `<div style="max-width:420px;margin-bottom:8px">${progressBar(st.doneN, st.total)}</div>` : ''}
     <div class="row between"><h1>${esc(l.title)}</h1>${c.mine ? `<a class="btn" href="#/c/${c.id}/lesson/${l.id}/edit">Επεξεργασία</a>` : ''}</div>
     ${!l.published ? msgBox('warn', 'Πρόχειρο — δεν είναι ορατό στους χρήστες.') : ''}
-    <div class="two" style="margin-top:12px"><div class="stack">
+    <div class="two lesson-two" style="margin-top:12px"><div class="stack">
       ${l.summary ? `<div class="panel text"><h2>Σύνοψη</h2>${rich(l.summary)}</div>` : ''}
       ${l.videos.length ? `<div class="panel"><h2>Βίντεο</h2>${videoCards(l.videos)}</div>` : ''}
       ${sims}
       ${hasQuiz ? `<div class="panel" id="quiz"><h2>Αυτοέλεγχος</h2>${quizHTML(l.quiz)}</div>` : ''}
       <div id="donewrap">${doneBox()}</div>
     </div><div class="stack">
-      ${mats.length ? `<div class="panel"><h2>Υλικό</h2><div id="mats">${materialsList(mats, false)}</div></div>` : ''}
+      ${mats.length || (l.recap_videos || []).length ? `<div class="panel"><h2>Υλικό</h2>${recapCards(l.recap_videos)}${mats.length ? `<div id="mats">${materialsList(mats, false)}</div>` : ''}</div>` : ''}
       ${as.filter(a => a.published || c.mine).length ? `<div class="panel"><h2>Εργασίες</h2><ul class="list">${as.filter(a => a.published || c.mine).map(a => `<li><a href="#/c/${c.id}/asg/${a.id}">${esc(a.title)}</a>${a.due_at ? ` <span class="muted small">· έως ${fmtDate(a.due_at)}</span>` : ''}</li>`).join('')}</ul></div>` : ''}
-      <div class="panel small"><div class="row between">${prevL ? `<a href="#/c/${c.id}/lesson/${prevL.id}">← ${esc(prevL.title)}</a>` : '<span></span>'}${nextL && (c.mine || !nextL.locked || me_l.done) ? `<a href="#/c/${c.id}/lesson/${nextL.id}">${esc(nextL.title)} →</a>` : nextL ? `<span class="muted">🔒 ${esc(nextL.title)}</span>` : ''}</div></div>
+      ${prevL || nextL ? `<div class="panel small"><div class="row between">${prevL ? `<a href="#/c/${c.id}/lesson/${prevL.id}">← ${esc(prevL.title)}</a>` : '<span></span>'}${nextL && (c.mine || !nextL.locked || me_l.done) ? `<a href="#/c/${c.id}/lesson/${nextL.id}">${esc(nextL.title)} →</a>` : nextL ? `<span class="muted">🔒 ${esc(nextL.title)}</span>` : ''}</div></div>` : ''}
     </div></div>`;
   bindMaterials(c.id, l.id, false, (path, title) => track(c, l.id, 'material_download', path, title));
   $$('a.vid').forEach(a => a.addEventListener('click', () => track(c, l.id, 'video_open', a.href, 'YouTube ' + (ytId(a.href) || ''))));
+  $$('a.recap').forEach(a => a.addEventListener('click', () => track(c, l.id, 'video_open', a.href, 'Ανασκόπηση: ' + l.title)));
   $$('a.simcard').forEach(a => a.addEventListener('click', () => track(c, l.id, 'sim_open', a.getAttribute('href'), a.textContent.replace('◎', '').trim())));
   try { const k = 'csl-v-' + l.id; if (!sessionStorage.getItem(k)) { sessionStorage.setItem(k, '1'); track(c, l.id, 'lesson_view', null, l.title); } } catch { track(c, l.id, 'lesson_view', null, l.title); }
   const complete = async score => {
@@ -839,7 +850,9 @@ function lessonEdit(c, l, mats) {
     <label>Σειρά<input type="number" name="pos" value="${l.position}" style="max-width:120px"></label>
     <label>Σύνοψη<textarea name="summary" style="min-height:180px">${esc(l.summary)}</textarea>
       <span class="hint">Κενή γραμμή = νέα παράγραφος· **έντονα**· οι σύνδεσμοι γίνονται αυτόματα clickable.</span></label>
-    <label>Βίντεο YouTube<textarea name="videos" style="min-height:70px" placeholder="https://youtu.be/...">${esc(l.videos.join('\n'))}</textarea>
+    <label>Βίντεο ανασκόπησης μαθήματος<textarea name="recap" style="min-height:52px" placeholder="https://youtu.be/...">${esc((l.recap_videos || []).join('\n'))}</textarea>
+      <span class="hint">Τα βίντεο ~10 λεπτών με την ανασκόπηση των διαφανειών. Εμφανίζονται πρώτα στο «Υλικό». Δεκτός και σύνδεσμος του YouTube Studio.</span></label>
+    <label>Άλλα βίντεο YouTube<textarea name="videos" style="min-height:70px" placeholder="https://youtu.be/...">${esc(l.videos.join('\n'))}</textarea>
       <span class="hint">Ένας σύνδεσμος ανά γραμμή (κανονικά βίντεο ή shorts). Ανοίγουν στο YouTube.</span></label>
     <div><b style="font-size:13.5px;color:var(--navy)">Προσομοιώσεις</b>${simPicker(l.sims)}</div>
     <label>Ερωτήσεις αυτοελέγχου<textarea name="quiz" style="min-height:160px" placeholder="? Πόση πίεση ασκούν 10 m νερού;\n- 0,1 bar\n* 1 bar\n- 10 bar\n> p = ρ·g·h ≈ 998·9,81·10 Pa ≈ 0,98 bar">${esc(l.quiz)}</textarea>
@@ -854,11 +867,12 @@ function lessonEdit(c, l, mats) {
   $('#fl').onsubmit = async e => {
     e.preventDefault(); const f = e.target;
     const vids = f.videos.value.split('\n').map(s => s.trim()).filter(Boolean);
-    const bad = vids.filter(v => !ytId(v));
+    const recap = f.recap.value.split('\n').map(s => s.trim()).filter(Boolean);
+    const bad = [...recap, ...vids].filter(v => !ytId(v));
     if (bad.length) return toast('Μη έγκυρος σύνδεσμος YouTube: ' + bad[0], true);
     try {
       await q(sb.from('lessons').update({ title: f.elements.namedItem('title').value.trim(), position: +f.pos.value || 0, summary: f.summary.value,
-        videos: vids, sims: $$('input[name=sim]:checked', f).map(x => x.value), quiz: f.quiz.value, published: f.pub.checked }).eq('id', l.id));
+        videos: vids, recap_videos: recap.map(v => 'https://www.youtube.com/watch?v=' + ytId(v)), sims: $$('input[name=sim]:checked', f).map(x => x.value), quiz: f.quiz.value, published: f.pub.checked }).eq('id', l.id));
       toast('Αποθηκεύτηκε.'); go(`#/c/${c.id}/lesson/${l.id}`);
     } catch (er) { toast(errText(er), true); }
   };

@@ -176,3 +176,15 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 .t tr.deleted td{color:var(--muted);background:#F7F9FB}
 h3.day{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px}
 .tl .ico{width:26px;height:26px;border-radius:50%;background:var(--soft);border:1px solid var(--line-2);display:grid;place-items:center;font-size:13px;flex:none}
+
+/* βίντεο ανασκόπησης στο «Υλικό» */
+.recaps{display:grid;gap:10px;margin-bottom:12px}
+.recap{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:center;text-decoration:none;color:var(--navy);border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;transition:box-shadow .15s}
+.recap:hover{box-shadow:0 6px 18px rgba(16,38,63,.12)}
+.rthumb{position:relative;display:block}
+.rthumb img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:#dfe8ef}
+.rthumb i{position:absolute;inset:0;margin:auto;width:34px;height:24px;border-radius:7px;background:rgba(255,0,0,.9);color:#fff;font-style:normal;font-size:12px;display:grid;place-items:center}
+.rtxt b{display:block;font-size:14px}
+.rtxt small{color:var(--muted);font-size:12px}
+@media (max-width:420px){.recap{grid-template-columns:1fr}}
+@media (max-width:820px){.lesson-two>.stack:last-child{order:-1}}
