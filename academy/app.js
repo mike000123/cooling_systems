@@ -1441,6 +1441,25 @@ const relDay = d => {
   const days = Math.floor((Date.now() - new Date(d)) / 864e5);
   return days <= 0 ? 'σήμερα' : days === 1 ? 'χθες' : days < 30 ? `πριν ${days} μέρες` : fmtDay(d);
 };
+// ταξινόμηση πίνακα με κλικ στην κεφαλίδα (αριθμοί/ημερομηνίες: πρώτα τα μεγαλύτερα)
+function sortable(table) {
+  if (!table) return;
+  const body = table.tBodies[0], ths = [...table.tHead.rows[0].cells];
+  ths.forEach((th, i) => {
+    th.classList.add('sortable'); th.tabIndex = 0; th.title = 'Ταξινόμηση';
+    const num = th.classList.contains('n'), date = th.hasAttribute('data-d');
+    const go = () => {
+      const dir = th.getAttribute('aria-sort') === 'descending' ? 'ascending' : th.getAttribute('aria-sort') === 'ascending' ? 'descending' : (num || date ? 'descending' : 'ascending');
+      ths.forEach(x => x.removeAttribute('aria-sort')); th.setAttribute('aria-sort', dir);
+      const k = tr => { const td = tr.cells[i]; if (!td) return ''; const v = td.dataset.v !== undefined ? td.dataset.v : td.textContent.trim(); return num ? (parseFloat(v) || 0) : v; };
+      const rows = [...body.rows].filter(r => !r.classList.contains('deleted')), tail = [...body.rows].filter(r => r.classList.contains('deleted'));
+      const m = dir === 'ascending' ? 1 : -1;
+      rows.sort((a, b) => { const x = k(a), y = k(b); if (!num && (x === '' || y === '')) return x === y ? 0 : x === '' ? 1 : -1; return (num ? x - y : String(x).localeCompare(String(y), 'el', { numeric: true, sensitivity: 'base' })) * m; });
+      [...rows, ...tail].forEach(r => body.appendChild(r));
+    };
+    th.onclick = go; th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+  });
+}
 function dailyChart(daily) {
   const W = 720, H = 180, P = { l: 34, r: 8, t: 10, b: 24 };
   const max = Math.max(4, ...daily.map(d => d.events));
@@ -1482,16 +1501,17 @@ route(/^\/admin$/, async tok => {
     ${tile(k.sims, 'ανοίγματα προσομοιώσεων')}
   </div>
   <div class="panel"><h2>Δραστηριότητα — τελευταίες 30 ημέρες</h2>${dailyChart(o.daily)}</div>
-  <div class="panel"><h2>Ανά μάθημα</h2><div class="tablewrap"><table class="t"><thead><tr><th>Μάθημα</th><th>Ενότητα</th><th class="n">Προβολές</th><th class="n">Μοναδικοί</th><th class="n">Ολοκληρώσεις</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody>
+  <div class="panel"><h2>Ανά μάθημα</h2><p class="muted small" style="margin:0 0 6px">Πατήστε στον τίτλο μιας στήλης για ταξινόμηση.</p><div class="tablewrap"><table class="t" id="lt"><thead><tr><th>Μάθημα</th><th>Ενότητα</th><th class="n">Προβολές</th><th class="n">Μοναδικοί</th><th class="n">Ολοκληρώσεις</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody>
     ${o.lessons.map(l => `<tr><td>${esc(l.title)}</td><td class="muted">${esc(l.class_name)}</td><td class="n">${l.views}</td><td class="n">${l.viewers}</td><td class="n">${l.completions}</td><td class="n">${l.downloads}</td><td class="n">${l.videos}</td><td class="n">${l.sims}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Δεν υπάρχουν δημοσιευμένα μαθήματα.</td></tr>'}
   </tbody></table></div></div>
   <div class="panel"><div class="row between"><h2 style="margin:0">Χρήστες (${o.people.length})</h2><input class="inp" id="uq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:280px"></div>
-  <div class="tablewrap" style="margin-top:10px"><table class="t"><thead><tr><th>Όνομα</th><th>Email</th><th>Εγγραφή</th><th>Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
-    ${o.people.map(p => `<tr class="click" data-u="${p.id}" data-s="${esc((p.full_name + ' ' + p.email).toLowerCase())}"><td>${esc(p.full_name)}</td><td class="muted">${esc(p.email)}</td><td>${fmtDay(p.created_at)}</td><td>${relDay(p.last_activity)}</td><td class="n">${p.completions}</td><td class="n">${p.downloads}</td><td class="n">${p.videos}</td><td class="n">${p.sims}</td></tr>`).join('')}
+  <div class="tablewrap" style="margin-top:10px"><table class="t" id="pt"><thead><tr><th>Όνομα</th><th>Email</th><th data-d="1">Εγγραφή</th><th data-d="1">Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
+    ${o.people.map(p => `<tr class="click" data-u="${p.id}" data-s="${esc((p.full_name + ' ' + p.email).toLowerCase())}"><td>${esc(p.full_name)}</td><td class="muted">${esc(p.email)}</td><td data-v="${esc(p.created_at || '')}">${fmtDay(p.created_at)}</td><td data-v="${esc(p.last_activity || '')}">${relDay(p.last_activity)}</td><td class="n">${p.completions}</td><td class="n">${p.downloads}</td><td class="n">${p.videos}</td><td class="n">${p.sims}</td></tr>`).join('')}
     ${delAny ? `<tr class="click deleted" data-u="deleted" data-s=""><td colspan="4"><i>Διαγραμμένοι χρήστες (ανώνυμα)</i></td><td class="n">${del.completions}</td><td class="n">${del.downloads}</td><td class="n">${del.videos}</td><td class="n">${del.sims}</td></tr>` : ''}
   </tbody></table></div>
   <p class="muted small">Τα «βίντεο» μετρούν τα κλικ για άνοιγμα στο YouTube, όχι τον χρόνο παρακολούθησης. Όταν ένας χρήστης διαγράφει τον λογαριασμό του, η δραστηριότητά του παραμένει μόνο ανώνυμα στα σύνολα.</p></div>`;
   bindChart();
+  sortable($('#lt')); sortable($('#pt'));
   $$('#ub tr.click').forEach(r => r.onclick = () => go('#/admin/u/' + r.dataset.u));
   $('#uq').oninput = e => { const v = e.target.value.trim().toLowerCase(); $$('#ub tr').forEach(r => r.hidden = !!v && !(r.dataset.s || '').includes(v)); };
   $('#csvu').onclick = () => {

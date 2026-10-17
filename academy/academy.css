@@ -222,3 +222,9 @@ body.viewing{overflow:hidden}
 .files .fallow{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:#4a5866;white-space:nowrap;margin-right:4px}
 @media print{body.viewing *{display:none!important}body.viewing::after{content:"Η εκτύπωση δεν επιτρέπεται.";display:block;padding:40px;font:16px sans-serif}}
 @media(max-width:600px){.vbar{padding:8px 10px}.vpages{padding:10px 6px 30px}}
+
+/* ταξινομήσιμοι πίνακες στατιστικών */
+.t th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+.t th.sortable:hover{color:var(--navy)}
+.t th[aria-sort=ascending]::after{content:" \25B2";font-size:10px}
+.t th[aria-sort=descending]::after{content:" \25BC";font-size:10px}

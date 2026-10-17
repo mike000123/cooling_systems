@@ -1,0 +1,18 @@
+function sortable(table) {
+  if (!table) return;
+  const body = table.tBodies[0], ths = [...table.tHead.rows[0].cells];
+  ths.forEach((th, i) => {
+    th.classList.add('sortable'); th.tabIndex = 0; th.title = 'Ταξινόμηση';
+    const num = th.classList.contains('n'), date = th.hasAttribute('data-d');
+    const go = () => {
+      const dir = th.getAttribute('aria-sort') === 'descending' ? 'ascending' : th.getAttribute('aria-sort') === 'ascending' ? 'descending' : (num || date ? 'descending' : 'ascending');
+      ths.forEach(x => x.removeAttribute('aria-sort')); th.setAttribute('aria-sort', dir);
+      const k = tr => { const td = tr.cells[i]; if (!td) return ''; const v = td.dataset.v !== undefined ? td.dataset.v : td.textContent.trim(); return num ? (parseFloat(v) || 0) : v; };
+      const rows = [...body.rows].filter(r => !r.classList.contains('deleted')), tail = [...body.rows].filter(r => r.classList.contains('deleted'));
+      const m = dir === 'ascending' ? 1 : -1;
+      rows.sort((a, b) => { const x = k(a), y = k(b); if (!num && (x === '' || y === '')) return x === y ? 0 : x === '' ? 1 : -1; return (num ? x - y : String(x).localeCompare(String(y), 'el', { numeric: true, sensitivity: 'base' })) * m; });
+      [...rows, ...tail].forEach(r => body.appendChild(r));
+    };
+    th.onclick = go; th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+  });
+}
