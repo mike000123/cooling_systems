@@ -1438,8 +1438,11 @@ const KIND = {
 const tile = (v, label, sub) => `<div class="tile"><b>${v}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
 const relDay = d => {
   if (!d) return '—';
-  const days = Math.floor((Date.now() - new Date(d)) / 864e5);
-  return days <= 0 ? 'σήμερα' : days === 1 ? 'χθες' : days < 30 ? `πριν ${days} μέρες` : fmtDay(d);
+  // ημερολογιακές μέρες στην τοπική ώρα (όχι «24ωρα»)
+  const t = new Date(d), mid = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((mid(new Date()) - mid(t)) / 864e5);
+  const hm = new Intl.DateTimeFormat('el-GR', { hour: '2-digit', minute: '2-digit' }).format(t);
+  return days <= 0 ? `σήμερα ${hm}` : days === 1 ? `χθες ${hm}` : days < 30 ? `πριν ${days} μέρες` : fmtDay(d);
 };
 // ταξινόμηση πίνακα με κλικ στην κεφαλίδα (αριθμοί/ημερομηνίες: πρώτα τα μεγαλύτερα)
 function sortable(table) {
