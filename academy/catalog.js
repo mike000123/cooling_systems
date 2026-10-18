@@ -5,7 +5,7 @@
 //   sims: προσομοιώσεις του site που υπάρχουν ήδη για το θέμα (id από sims.json)
 window.ACADEMY_CATALOG = {
   title: 'Όλα τα μαθήματα',
-  levelNames: ['Αρχάριο', 'Μέσο', 'Προχωρημένο', 'Επαγγελματικό'],
+  levelNames: ['Starter', 'Intermediate', 'Advanced', 'Professional'],
   tracks: [
   { key: 'refrig', name: 'Ψυκτικές & κλιματιστικές εγκαταστάσεις', short: 'Ψύξη & κλιματισμός',
     headline: 'Μάθε ψύξη & κλιματισμό',

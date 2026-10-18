@@ -515,6 +515,23 @@ async function unreadPanel() {
     `<li><a class="item" href="#/c/${m.class_id}/chat${isTeacher() ? '/' + m.student_id : ''}"><span class="spacer"><b>${esc(isTeacher() ? (m.student?.full_name || '') : 'Από τον εκπαιδευτή')}</b><br><span class="muted small">${esc(m.classes?.name || '')} · ${fmtDay(m.created_at)}</span></span><span class="badge">${m.n}</span></a></li>`).join('')}</ul></div>`;
 }
 
+// θέση μιας ενότητας στον κατάλογο (τομέας, επίπεδο, όνομα, περιγραφή)
+function catOf(classId) {
+  for (const t of TRACKS) for (const [i, l] of t.levels.entries()) for (const c of l.courses) if (c.classId === classId) return { c, t, i, l };
+  return null;
+}
+function myCourseCards(classes, tot, dn) {
+  const LVN = (CAT && CAT.levelNames) || [];
+  return `<div class="mygrid">${classes.map(k => {
+    const m = catOf(k.id), t = tot[k.id] || 0, d = dn[k.id] || 0;
+    const tag = m ? `${m.t.short || m.t.name} · ${m.l.name || LVN[m.i] || 'Επίπεδο ' + (m.i + 1)}` : '';
+    const desc = (m && m.c.desc) || k.description || '';
+    const btn = !t ? '' : d === t ? 'Επανάληψη →' : d ? 'Συνέχισε →' : 'Ξεκίνα →';
+    return `<a class="mycard" href="#/c/${k.id}">${tag ? `<span class="mytag">${esc(tag)}</span>` : ''}<h3>${esc(m ? m.c.name : k.name)}</h3>
+      ${desc ? `<p class="muted small cdesc">${esc(desc)}</p>` : ''}
+      ${t ? progressBar(d, t, d === t ? '🎉 Ολοκληρώθηκε' : d ? 'Η πρόοδός σου' : 'Δεν ξεκίνησες ακόμη') : '<span class="muted small">Τα πρώτα μαθήματα ανεβαίνουν σύντομα</span>'}
+      ${btn ? `<span class="btn accent small">${btn}</span>` : ''}</a>`; }).join('')}</div>`;
+}
 function classCards(list, extra) {
   if (!list.length) return '';
   return `<div class="grid">${list.map(c => `<a class="card" href="#/c/${c.id}"><h3>${esc(c.name)}</h3>
@@ -546,26 +563,38 @@ async function catalogPanel(opts) {
   if (!TRACKS.length) return '';
   const T = curT(), LVN = (CAT && CAT.levelNames) || [];
   const names = await loadSimNames(), mine = new Set(catOpts.mine || []), counts = catOpts.counts || null;
+  const acc = catOpts.access || null, pr = catOpts.prog || {};
+  const stateOf = c => !c.classId ? 'soon' : !acc ? 'open' : acc.has(c.classId) ? 'mine' : 'locked';
   const card = c => {
-    const open = !!c.classId, sl = (c.sims || []).filter(k => names[k]);
+    const open = !!c.classId, st = stateOf(c), sl = (c.sims || []).filter(k => names[k]);
     const sims = sl.slice(0, 2).map(k => `<a class="simlink" href="${esc(simHref(k))}" target="_blank" rel="noopener" title="${esc(names[k])}">◎ ${esc(names[k])}</a>`).join('')
       + (sl.length > 2 ? `<span class="simmore" title="${esc(sl.slice(2).map(k => names[k]).join(' · '))}">+${sl.length - 2}</span>` : '');
-    const action = open ? `<a class="btn accent small" href="${session ? '#/c/' + esc(c.classId) : '#/register'}">${session ? 'Ξεκίνα →' : 'Εγγραφή & ξεκίνα →'}</a>`
+    const p = pr[c.classId] || { d: 0, t: 0 };
+    const action = st === 'mine' ? `<a class="btn accent small" href="#/c/${esc(c.classId)}">${p.d && p.d === p.t ? 'Επανάληψη →' : p.d ? 'Συνέχισε →' : 'Ξεκίνα →'}</a>${p.t ? `<span class="small muted ccprog">${p.d}/${p.t} μαθήματα</span>` : ''}`
+      : st === 'locked' ? `<button class="btn small joinlink">🔑 Έχω κωδικό τμήματος</button>`
+      : open ? `<a class="btn accent small" href="${session ? '#/c/' + esc(c.classId) : '#/register'}">${session ? 'Ξεκίνα →' : 'Εγγραφή & ξεκίνα →'}</a>`
       : counts ? `<span class="pill info">🔔 ${counts[c.key] || 0} ενδιαφέρονται</span>`
       : session ? `<button class="btn small notify${mine.has(c.key) ? ' on' : ''}" data-k="${esc(c.key)}">${mine.has(c.key) ? NOTIFY_ON : NOTIFY_OFF}</button>`
       : `<a class="btn small" href="#/register">${NOTIFY_OFF}</a>`;
-    return `<div class="ccard${open ? ' open' : ''}">${open ? '<span class="pill ok">Διαθέσιμο</span>' : '<span class="pill warn">Ετοιμάζεται</span>'}
+    const pill = { mine: '<span class="pill ok">✓ Ανοιχτό για σένα</span>', locked: '<span class="pill info">🔒 Με κωδικό τμήματος</span>', open: '<span class="pill ok">Διαθέσιμο</span>', soon: '<span class="pill warn">Έρχεται σύντομα</span>' }[st];
+    return `<div class="ccard${open ? ' open' : ''}${st === 'mine' ? ' mine' : ''}">${pill}
       <h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.desc || '')}</p>
       ${sims ? `<div class="simlinks"><span class="small muted">${open ? 'Προσομοιώσεις:' : 'Δοκίμασε ήδη τώρα:'}</span>${sims}</div>` : ''}
       <div class="ccact">${action}</div></div>`;
   };
   const all = T.levels.flatMap(l => l.courses), nOpen = all.filter(c => c.classId).length;
+  const nMine = acc ? all.filter(c => stateOf(c) === 'mine').length : 0, nLock = acc ? all.filter(c => stateOf(c) === 'locked').length : 0;
+  const summary = acc ? [nMine ? `${nMine} ανοιχτ${nMine === 1 ? 'ό' : 'ά'} για σένα` : '', nLock ? `${nLock} με κωδικό` : '', `${all.length - nOpen} έρχονται σύντομα`].filter(Boolean).join(' · ')
+    : `${nOpen} διαθέσιμα · ${all.length - nOpen} έρχονται σύντομα`;
+  const lg = (cls, label, txt) => `<span class="lgi"><span class="pill ${cls}">${label}</span> ${txt}</span>`;
+  const legend = acc ? `<div class="catlegend small">${lg('ok', '✓ Ανοιχτό για σένα', 'μπορείς να το παρακολουθήσεις τώρα')}${nLock ? lg('info', '🔒 Με κωδικό τμήματος', 'θέλει κωδικό από τον εκπαιδευτή') : ''}${lg('warn', 'Έρχεται σύντομα', 'πάτα 🔔 για να ενημερωθείς')}</div>` : '';
   const tabs = TRACKS.length > 1 ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${TRACKS.map(t => {
       const n = t.levels.reduce((a, l) => a + l.courses.length, 0);
       return `<button role="tab" class="ttab${t === T ? ' on' : ''}" aria-selected="${t === T}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}</nav>` : '';
   return `<div class="panel catalog${tabs ? ' hastabs' : ''}" id="catalog">${tabs}<div class="tbody">
-    <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="pill">${nOpen} διαθέσιμα · ${all.length - nOpen} ετοιμάζονται</span></div>
-    <p class="muted" style="margin:6px 0 0">${all.length} μαθήματα σε ${T.levels.length} επίπεδα, από τα βασικά ως το επαγγελματικό.</p>
+    ${acc ? '<p class="catkick">Όλος ο κατάλογος μαθημάτων</p>' : ''}
+    <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="pill">${summary}</span></div>
+    <p class="muted" style="margin:6px 0 0">${all.length} μαθήματα σε ${T.levels.length} επίπεδα, από τα βασικά ως το επαγγελματικό.</p>${legend}
     ${T.levels.map((l, i) => `<section class="lvl"><div class="lvlhead"><span class="lvlnum">${i + 1}</span><div class="spacer"><h3>${esc(l.name || LVN[i] || 'Επίπεδο ' + (i + 1))}</h3>${l.tag ? `<p class="muted small">${esc(l.tag)}</p>` : ''}</div>
       <span class="lvlnav"><button class="btn small" data-d="-1" aria-label="Προηγούμενα">‹</button><button class="btn small" data-d="1" aria-label="Επόμενα">›</button></span></div>
       <div class="rail">${l.courses.map(card).join('')}</div></section>`).join('')}</div></div>`;
@@ -582,6 +611,9 @@ function bindCatalog() {
     const upd = () => { nav.hidden = rail.scrollWidth <= rail.clientWidth + 4; };
     $$('button', nav).forEach(b => b.onclick = () => rail.scrollBy({ left: +b.dataset.d * Math.max(260, rail.clientWidth * .8), behavior: 'smooth' }));
     upd(); window.addEventListener('resize', upd);
+  });
+  $$('#catalog .joinlink').forEach(b => b.onclick = () => {
+    const d = $('#joinbox'); if (!d) return; d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => d.querySelector('input')?.focus(), 300);
   });
   $$('#catalog button.notify').forEach(b => b.onclick = async () => {
     const k = b.dataset.k, on = b.classList.contains('on'); b.disabled = true;
@@ -631,7 +663,8 @@ async function studentHome(tok) {
     F.assignments ? q(sb.from('submissions').select('assignment_id,status,points,graded_at,feedback,assignments(title,max_points,class_id)').eq('student_id', me.id)) : none(),
     F.announcements ? q(sb.from('announcements').select('id,title,created_at,class_id,classes(name)').order('created_at', { ascending: false }).limit(5)) : none()]);
   const unreadHTML = await unreadPanel();
-  const catHTML = await catalogPanel({ mine: await myInterests() });
+  const prog = {}; classes.forEach(c => prog[c.id] = { d: dn[c.id] || 0, t: tot[c.id] || 0 });
+  const catHTML = await catalogPanel({ mine: await myInterests(), access: new Set(classes.map(c => c.id)), prog });
   if (stale(tok)) return;
   const done = new Set(subs.map(s => s.assignment_id));
   const todo = asgs.filter(a => !done.has(a.id));
@@ -639,10 +672,10 @@ async function studentHome(tok) {
   const side = F.assignments || F.announcements || unreadHTML;
   app.innerHTML = `<div class="row between"><h1>Γεια σας, ${esc(me.full_name.split(' ')[0])}</h1></div>
   <div class="${side ? 'two' : ''}"><div class="stack">
-    <div class="panel"><h2>Ενότητες</h2>
-      ${classes.length ? classCards(classes, c => tot[c.id] ? progressBar(dn[c.id] || 0, tot[c.id], dn[c.id] === tot[c.id] ? '🎉 Ολοκληρώθηκε' : dn[c.id] ? 'Πρόοδος' : 'Δεν ξεκίνησε ακόμη') : '<span class="muted small">Σύντομα μαθήματα</span>')
-        : `<div class="empty">Δεν υπάρχει ακόμη διαθέσιμο υλικό. Ξαναδείτε σύντομα!</div>`}
-      <details style="margin-top:14px"><summary class="muted small" style="cursor:pointer">Έχετε κωδικό για κλειστή ενότητα;</summary>
+    <div class="panel"><h2 style="margin-bottom:2px">Τα μαθήματά μου</h2><p class="muted small" style="margin:0 0 12px">Ανοιχτά για σένα — μπορείς να τα παρακολουθήσεις τώρα.</p>
+      ${classes.length ? myCourseCards(classes, tot, dn)
+        : `<div class="empty">Δεν υπάρχει ακόμη διαθέσιμο υλικό. Δες παρακάτω τον κατάλογο και πάτα 🔔 στα μαθήματα που σε ενδιαφέρουν.</div>`}
+      <details id="joinbox" style="margin-top:14px"><summary class="muted small" style="cursor:pointer">Έχεις κωδικό τμήματος από τον εκπαιδευτή σου;</summary>
       <form class="row" id="join" style="margin-top:8px"><input class="inp" name="code" placeholder="Κωδικός ενότητας" maxlength="12" style="max-width:220px;text-transform:uppercase" required><button class="btn">Είσοδος</button></form></details>
     </div>
     ${F.assignments ? `<div class="panel"><h2>Εκκρεμείς εργασίες</h2>

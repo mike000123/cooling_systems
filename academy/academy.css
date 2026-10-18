@@ -298,3 +298,19 @@ body.viewing{overflow:hidden}
   .lhcta .btn{flex:1 1 0;min-width:0;padding:10px 8px;font-size:14px;align-self:flex-end}
   .lhcta .lg{display:none}.lhcta .sm{display:inline}
 }
+
+/* «Τα μαθήματά μου» + καταστάσεις καταλόγου (2026-10-18) */
+.mygrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.mycard{display:flex;flex-direction:column;gap:6px;align-items:flex-start;background:#fff;border:1px solid var(--orange);box-shadow:0 0 0 2px rgba(226,103,43,.12);border-radius:14px;padding:12px 14px;text-decoration:none;color:var(--ink)}
+.mycard:hover{box-shadow:0 0 0 3px rgba(226,103,43,.25)}
+.mycard h3{margin:0;font-size:16px;color:var(--navy)}
+.mycard .cdesc{margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mycard .prog{width:100%}
+.mycard .btn{margin-top:4px}
+.mytag{font-size:11.5px;font-weight:700;letter-spacing:.02em;color:#174E68;background:#E8F4FA;border:1px solid #C3E0EE;border-radius:999px;padding:1px 8px}
+.catkick{margin:0 0 4px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--orange)}
+.catlegend{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:10px;color:var(--muted)}
+.catlegend{gap:6px 18px}.lgi{display:inline-flex;align-items:center;gap:6px}
+.ccard.mine{border-color:#2E9E6A;box-shadow:0 0 0 2px rgba(46,158,106,.14)}
+.ccact{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ccprog{white-space:nowrap}
