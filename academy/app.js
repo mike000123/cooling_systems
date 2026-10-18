@@ -238,10 +238,11 @@ const route = (re, fn) => routes.push([re, fn]);
 let navToken = 0;
 function go(h) { if (location.hash === h) render(); else location.hash = h; }
 function bindPreview() {
-  const on = $('#prev-on'), ex = $('#prev-exit'), rs = $('#prev-reset');
+  const on = $('#prev-on'), ex = $('#prev-exit'), rs = $('#prev-reset'), hp = $('#prev-home');
+  if (hp) hp.onclick = () => { try { sessionStorage.setItem(HOME_PREVIEW, '1'); } catch {} render(); };
   const cid = (location.hash.match(/#\/c\/([\w-]{36})/) || [])[1];
   if (on) on.onclick = () => { try { sessionStorage.setItem(PREVIEW_KEY, cid); } catch {} go('#/c/' + cid); };
-  if (ex) ex.onclick = () => { try { sessionStorage.removeItem(PREVIEW_KEY); } catch {} render(); };
+  if (ex) ex.onclick = () => { try { sessionStorage.removeItem(PREVIEW_KEY); sessionStorage.removeItem(HOME_PREVIEW); } catch {} render(); };
   if (rs) rs.onclick = async () => { try { await q(sb.from('lesson_progress').delete().eq('class_id', cid).eq('user_id', me.id)); toast('Η πρόοδός σας μηδενίστηκε.'); render(); } catch (er) { toast(errText(er), true); } };
 }
 async function render() {
@@ -501,7 +502,7 @@ route(/^\/?$/, async tok => {
     return;
   }
   if (!me) await loadMe();
-  return isTeacher() ? teacherHome(tok) : studentHome(tok);
+  return isTeacher() && !homePreview() ? teacherHome(tok) : studentHome(tok);
 });
 
 async function unreadPanel() {
@@ -616,6 +617,7 @@ function bindCatalog() {
     const d = $('#joinbox'); if (!d) return; d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => d.querySelector('input')?.focus(), 300);
   });
   $$('#catalog button.notify').forEach(b => b.onclick = async () => {
+    if (homePreview()) { toast('Σε προβολή ως χρήστης το «Ενημέρωσέ με» δεν αποθηκεύεται.'); return; }
     const k = b.dataset.k, on = b.classList.contains('on'); b.disabled = true;
     try {
       if (on) await q(sb.from('course_interest').delete().eq('user_id', me.id).eq('course_key', k));
@@ -658,11 +660,13 @@ async function studentHome(tok) {
   const tot = {}, dn = {}; lessons.forEach(l => tot[l.class_id] = (tot[l.class_id] || 0) + 1);
   const pubIds = new Set(lessons.map(l => l.id)); myProg.filter(p => pubIds.has(p.lesson_id)).forEach(p => dn[p.class_id] = (dn[p.class_id] || 0) + 1);
   const [classes, asgs, subs, anns] = await Promise.all([
-    q(sb.from('classes').select('id,name,description').order('created_at')),
+    q(sb.from('classes').select('id,name,description,is_open,archived').order('created_at')),
     F.assignments ? q(sb.from('assignments').select('id,title,due_at,class_id,allow_late,classes(name)').order('due_at', { ascending: true, nullsFirst: false })) : none(),
     F.assignments ? q(sb.from('submissions').select('assignment_id,status,points,graded_at,feedback,assignments(title,max_points,class_id)').eq('student_id', me.id)) : none(),
     F.announcements ? q(sb.from('announcements').select('id,title,created_at,class_id,classes(name)').order('created_at', { ascending: false }).limit(5)) : none()]);
   const unreadHTML = await unreadPanel();
+  const pv = homePreview();
+  if (pv) classes.splice(0, classes.length, ...classes.filter(c => c.is_open && !c.archived));   // όπως ένας νέος χρήστης: μόνο ανοιχτές ενότητες
   const prog = {}; classes.forEach(c => prog[c.id] = { d: dn[c.id] || 0, t: tot[c.id] || 0 });
   const catHTML = await catalogPanel({ mine: await myInterests(), access: new Set(classes.map(c => c.id)), prog });
   if (stale(tok)) return;
@@ -670,7 +674,8 @@ async function studentHome(tok) {
   const todo = asgs.filter(a => !done.has(a.id));
   const graded = subs.filter(s => s.status === 'returned').sort((a, b) => new Date(b.graded_at) - new Date(a.graded_at)).slice(0, 5);
   const side = F.assignments || F.announcements || unreadHTML;
-  app.innerHTML = `<div class="row between"><h1>Γεια σας, ${esc(me.full_name.split(' ')[0])}</h1></div>
+  app.innerHTML = `${pv ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε την αρχική όπως ένας χρήστης (μόνο ανοιχτές ενότητες, χωρίς πρόχειρα). Η πρόοδος είναι η δική σας.</span><span class="row"><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : ''}
+  <div class="row between"><h1>Γεια σας, ${esc(me.full_name.split(' ')[0])}</h1></div>
   <div class="${side ? 'two' : ''}"><div class="stack">
     <div class="panel"><h2 style="margin-bottom:2px">Τα μαθήματά μου</h2><p class="muted small" style="margin:0 0 12px">Ανοιχτά για σένα — μπορείς να τα παρακολουθήσεις τώρα.</p>
       ${classes.length ? myCourseCards(classes, tot, dn)
@@ -722,7 +727,7 @@ async function teacherHome(tok) {
   const cnt = {}; enr.forEach(e => cnt[e.class_id] = (cnt[e.class_id] || 0) + 1);
   const pc = {}; pend.forEach(p => pc[p.assignments.class_id] = (pc[p.assignments.class_id] || 0) + 1);
   const side = F.assignments || unreadHTML;
-  app.innerHTML = `<div class="row between"><h1>Οι ενότητές μου</h1><span class="row"><a class="btn" href="#/admin">📊 Στατιστικά</a><a class="btn accent" href="#/new-class">+ Νέα ενότητα</a></span></div>
+  app.innerHTML = `<div class="row between"><h1>Οι ενότητές μου</h1><span class="row"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn" href="#/admin">📊 Στατιστικά</a><a class="btn accent" href="#/new-class">+ Νέα ενότητα</a></span></div>
   <div class="${side ? 'two' : ''}"><div class="panel">
     ${classes.length ? classCards(classes, c => `<div class="row">${c.is_open ? '<span class="pill ok">Ανοιχτή σε όλους</span>' : `<span class="pill">Κλειστή · ${cnt[c.id] || 0} μέλη</span>`}${pc[c.id] ? `<span class="pill warn">${pc[c.id]} προς βαθμολόγηση</span>` : ''}${c.archived ? '<span class="pill">Αρχειοθετημένο</span>' : ''}</div>`)
       : `<div class="empty">Δεν έχετε ενότητες ακόμη. Φτιάξτε την πρώτη και προσθέστε μαθήματα.</div>`}
@@ -748,8 +753,9 @@ route(/^\/new-class$/, async () => {
 });
 
 // ================================================================ ΤΜΗΜΑ
-const PREVIEW_KEY = 'csl-preview';
-const inPreview = cid => { try { return sessionStorage.getItem(PREVIEW_KEY) === cid; } catch { return false; } };
+const PREVIEW_KEY = 'csl-preview', HOME_PREVIEW = 'csl-preview-home';
+const homePreview = () => { try { return isTeacher() && sessionStorage.getItem(HOME_PREVIEW) === '1'; } catch { return false; } };
+const inPreview = cid => { try { return sessionStorage.getItem(PREVIEW_KEY) === cid || homePreview(); } catch { return false; } };
 async function loadClass(cid) {
   const c = await q(sb.from('classes').select('*').eq('id', cid).maybeSingle());
   if (!c) throw new Error('Η ενότητα δεν βρέθηκε ή δεν έχετε πρόσβαση.');
