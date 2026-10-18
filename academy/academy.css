@@ -228,3 +228,73 @@ body.viewing{overflow:hidden}
 .t th.sortable:hover{color:var(--navy)}
 .t th[aria-sort=ascending]::after{content:" \25B2";font-size:10px}
 .t th[aria-sort=descending]::after{content:" \25BC";font-size:10px}
+
+/* κατάλογος μαθημάτων: 4 επίπεδα, κάθε επίπεδο σε οριζόντια σειρά */
+.catalog .lvl{margin-top:18px}
+.lvlhead{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.lvlhead h3{margin:0;font-size:17px}
+.lvlhead p{margin:2px 0 0}
+.lvlnum{flex:none;width:34px;height:34px;border-radius:10px;background:var(--navy);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
+.lvlnav{display:flex;gap:6px}
+.lvlnav .btn{width:34px;justify-content:center;font-size:18px;line-height:1}
+.rail{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 2px 10px;scrollbar-width:thin}
+.rail::-webkit-scrollbar{height:6px}.rail::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px}
+.ccard{flex:0 0 286px;scroll-snap-align:start;background:var(--soft);border:1px dashed var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.ccard.open{background:#fff;border:1px solid var(--orange);box-shadow:0 0 0 2px rgba(226,103,43,.12)}
+.ccard h3{margin:2px 0 0;font-size:15px;line-height:1.25}
+.ccard .cdesc{margin:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.simlinks{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.simlink{font-size:12px;padding:2px 8px;border-radius:999px;background:#E8F4FA;color:#174E68;text-decoration:none;border:1px solid #C3E0EE;max-width:236px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.simlink:hover{background:#D6ECF6}
+.simmore{font-size:12px;font-weight:700;color:#174E68}
+.ccact{margin-top:auto;padding-top:4px}
+.btn.notify.on{background:#E6F6EF;border-color:#BFE6D3;color:#14603F}
+/* τομείς (tabs στο πλάι) */
+.catalog.hastabs{display:grid;grid-template-columns:210px minmax(0,1fr);gap:20px;align-items:start}
+.ttabs{display:flex;flex-direction:column;gap:8px;position:sticky;top:16px}
+.ttab{text-align:left;border:1px solid var(--line);background:var(--soft);border-radius:12px;padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:2px;font:inherit;color:var(--ink)}
+.ttab b{font-size:14.5px;color:var(--navy)}
+.ttab span{font-size:12px;color:var(--muted)}
+.ttab:hover{border-color:var(--blue)}
+.ttab.on{background:var(--navy);border-color:var(--navy)}
+.ttab.on b{color:#fff}.ttab.on span{color:#C9DCEC}
+.tbody{min-width:0}
+/* αρχική για επισκέπτες */
+.land{display:flex;flex-direction:column;gap:18px}
+.lhero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);background:#fff;border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 10px 30px rgba(16,38,63,.06)}
+.lhtext{padding:26px 26px 24px;display:flex;flex-direction:column;gap:12px;background:radial-gradient(circle at 0 0,#EAF4FC,transparent 60%)}
+.lhkicker{display:inline-flex;align-items:center;gap:8px;font-weight:800;color:var(--navy);font-size:14px;letter-spacing:.02em}
+.lhkicker svg{width:20px;height:20px;color:#7FB2DE}
+.lhero h1{margin:0}
+.hbar{display:inline;background:linear-gradient(150deg,#122C52,#1A3F6E);color:#fff;padding:4px 14px;border-radius:12px;line-height:1.55;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.lhlead{margin:0;font-size:16px;color:var(--ink)}
+.orange{color:#EE6A12}
+.ticks{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:7px;font-size:14.5px}
+.ticks li{padding-left:26px;position:relative}
+.ticks li::before{content:'✓';position:absolute;left:0;top:1px;color:#fff;background:#EE6A12;width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.lhimg{position:relative;min-height:330px}
+.lhimg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:60% 35%}
+.lhimg::before{content:'';position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,#fff 0,rgba(255,255,255,0) 20%),linear-gradient(0deg,rgba(10,26,47,.55) 0,rgba(10,26,47,0) 42%)}
+.lsticker{position:absolute;z-index:2;right:16px;top:14px;width:92px;height:92px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle at 30% 25%,#FFC07A,#FF5F2E 70%);color:#fff;font-weight:900;font-size:17px;line-height:1;transform:rotate(-12deg);box-shadow:0 8px 20px rgba(255,95,46,.4)}
+.lsticker small{font-size:12px}
+.lhcta{position:absolute;z-index:2;left:18%;right:18px;bottom:18px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.btn.big{justify-content:center;padding:11px 18px;font-size:15px;border-radius:12px}
+.lhcta .btn.big:not(.accent){background:rgba(255,255,255,.94)}
+.lhcta .btn.accent{box-shadow:0 10px 26px rgba(238,106,18,.45)}
+.land .catalog{margin:0}
+.lhcta .sm{display:none}
+.lhcta .btn{white-space:nowrap}
+@media (max-width:900px){
+  .catalog.hastabs{grid-template-columns:minmax(0,1fr);gap:12px}
+  .ttabs{flex-direction:row;position:static}
+  .ttab{flex:1 1 0;min-width:0}
+  .ttab b{font-size:13.5px}
+  .lhero{grid-template-columns:1fr}
+  .lhimg{order:-1;min-height:300px}
+  .lhimg img{object-position:55% 20%}
+  .lsticker{width:76px;height:76px;font-size:14px;top:10px;right:10px}
+  .lhimg::before{background:linear-gradient(0deg,rgba(10,26,47,.55) 0,rgba(10,26,47,0) 50%)}
+  .lhcta{left:12px;right:12px;bottom:12px;flex-wrap:nowrap;gap:8px}
+  .lhcta .btn{flex:1 1 0;min-width:0;padding:10px 8px;font-size:14px;align-self:flex-end}
+  .lhcta .lg{display:none}.lhcta .sm{display:inline}
+}

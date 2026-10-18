@@ -495,11 +495,9 @@ route(/^\/profile$/, async () => {
 // ================================================================ ΑΡΧΙΚΗ / ΠΙΝΑΚΑΣ
 route(/^\/?$/, async tok => {
   if (!session) {
-    app.innerHTML = `<div class="hero"><div class="panel stack">
-      <h1>Cooling Systems Lab Academy</h1>
-      <p>Μαθησιακό υλικό ψύξης και κλιματισμού σε ενότητες, από τα βασικά μέχρι προχωρημένα θέματα, δεμένο με τις διαδραστικές προσομοιώσεις του Cooling Systems Lab.</p>
-      <div class="row"><a class="btn accent" href="#/register">Εγγραφή</a><a class="btn" href="#/login">Σύνδεση</a></div>
-      <p class="muted small">Η εγγραφή είναι δωρεάν.</p></div>${intro()}</div>`;
+    const catHTML = await catalogPanel({});
+    if (session) return;
+    app.innerHTML = landingHTML(catHTML); bindCatalog();
     return;
   }
   if (!me) await loadMe();
@@ -524,6 +522,103 @@ function classCards(list, extra) {
     ${extra ? extra(c) : ''}</a>`).join('')}</div>`;
 }
 
+// ---------------------------------------------------------------- κατάλογος μαθημάτων (catalog.js)
+// Διαθέσιμα μαθήματα (με ενότητα) + «Ετοιμάζεται» με προσομοιώσεις που υπάρχουν ήδη και «Ενημέρωσέ με».
+const CAT = window.ACADEMY_CATALOG;
+let simNames = null;
+async function loadSimNames() {
+  if (simNames) return simNames;
+  try { simNames = Object.fromEntries((await (await fetch('sims.json')).json()).map(s => [s.id, s.t])); } catch (e) { simNames = {}; }
+  return simNames;
+}
+async function myInterests() { try { return (await q(sb.from('course_interest').select('course_key').eq('user_id', me.id))).map(r => r.course_key); } catch (e) { return []; } }
+async function interestCounts() {
+  try { const c = {}; (await q(sb.from('course_interest').select('course_key'))).forEach(r => c[r.course_key] = (c[r.course_key] || 0) + 1); return c; } catch (e) { return {}; }
+}
+const NOTIFY_OFF = '🔔 Ενημέρωσέ με όταν ανοίξει', NOTIFY_ON = '✓ Θα ενημερωθείς';
+// τομέας (track) που βλέπει ο χρήστης· θυμόμαστε την επιλογή του
+const TRACKS = (CAT && CAT.tracks) || (CAT && (CAT.levels || CAT.semesters) ? [{ key: 'all', name: CAT.title, short: CAT.title, headline: 'Μάθε ψύξη & κλιματισμό', levels: CAT.levels || CAT.semesters }] : []);
+let curTrack = (() => { try { return localStorage.getItem('csl-track') || ''; } catch (e) { return ''; } })();
+const curT = () => TRACKS.find(t => t.key === curTrack) || TRACKS[0];
+let catOpts = {};
+async function catalogPanel(opts) {
+  if (opts) catOpts = opts;
+  if (!TRACKS.length) return '';
+  const T = curT(), LVN = (CAT && CAT.levelNames) || [];
+  const names = await loadSimNames(), mine = new Set(catOpts.mine || []), counts = catOpts.counts || null;
+  const card = c => {
+    const open = !!c.classId, sl = (c.sims || []).filter(k => names[k]);
+    const sims = sl.slice(0, 2).map(k => `<a class="simlink" href="${esc(simHref(k))}" target="_blank" rel="noopener" title="${esc(names[k])}">◎ ${esc(names[k])}</a>`).join('')
+      + (sl.length > 2 ? `<span class="simmore" title="${esc(sl.slice(2).map(k => names[k]).join(' · '))}">+${sl.length - 2}</span>` : '');
+    const action = open ? `<a class="btn accent small" href="${session ? '#/c/' + esc(c.classId) : '#/register'}">${session ? 'Ξεκίνα →' : 'Εγγραφή & ξεκίνα →'}</a>`
+      : counts ? `<span class="pill info">🔔 ${counts[c.key] || 0} ενδιαφέρονται</span>`
+      : session ? `<button class="btn small notify${mine.has(c.key) ? ' on' : ''}" data-k="${esc(c.key)}">${mine.has(c.key) ? NOTIFY_ON : NOTIFY_OFF}</button>`
+      : `<a class="btn small" href="#/register">${NOTIFY_OFF}</a>`;
+    return `<div class="ccard${open ? ' open' : ''}">${open ? '<span class="pill ok">Διαθέσιμο</span>' : '<span class="pill warn">Ετοιμάζεται</span>'}
+      <h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.desc || '')}</p>
+      ${sims ? `<div class="simlinks"><span class="small muted">${open ? 'Προσομοιώσεις:' : 'Δοκίμασε ήδη τώρα:'}</span>${sims}</div>` : ''}
+      <div class="ccact">${action}</div></div>`;
+  };
+  const all = T.levels.flatMap(l => l.courses), nOpen = all.filter(c => c.classId).length;
+  const tabs = TRACKS.length > 1 ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${TRACKS.map(t => {
+      const n = t.levels.reduce((a, l) => a + l.courses.length, 0);
+      return `<button role="tab" class="ttab${t === T ? ' on' : ''}" aria-selected="${t === T}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}</nav>` : '';
+  return `<div class="panel catalog${tabs ? ' hastabs' : ''}" id="catalog">${tabs}<div class="tbody">
+    <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="pill">${nOpen} διαθέσιμα · ${all.length - nOpen} ετοιμάζονται</span></div>
+    <p class="muted" style="margin:6px 0 0">${all.length} μαθήματα σε ${T.levels.length} επίπεδα, από τα βασικά ως το επαγγελματικό.</p>
+    ${T.levels.map((l, i) => `<section class="lvl"><div class="lvlhead"><span class="lvlnum">${i + 1}</span><div class="spacer"><h3>${esc(l.name || LVN[i] || 'Επίπεδο ' + (i + 1))}</h3>${l.tag ? `<p class="muted small">${esc(l.tag)}</p>` : ''}</div>
+      <span class="lvlnav"><button class="btn small" data-d="-1" aria-label="Προηγούμενα">‹</button><button class="btn small" data-d="1" aria-label="Επόμενα">›</button></span></div>
+      <div class="rail">${l.courses.map(card).join('')}</div></section>`).join('')}</div></div>`;
+}
+function bindCatalog() {
+  $$('#catalog .ttab').forEach(b => b.onclick = async () => {
+    curTrack = b.dataset.t; try { localStorage.setItem('csl-track', curTrack); } catch (e) { }
+    const html = await catalogPanel(); const old = $('#catalog'); if (!old) return;
+    old.outerHTML = html; const h = $('#lhHead'); if (h) h.textContent = curT().headline || '';
+    bindCatalog();
+  });
+  $$('#catalog .lvl').forEach(sec => {
+    const rail = $('.rail', sec), nav = $('.lvlnav', sec);
+    const upd = () => { nav.hidden = rail.scrollWidth <= rail.clientWidth + 4; };
+    $$('button', nav).forEach(b => b.onclick = () => rail.scrollBy({ left: +b.dataset.d * Math.max(260, rail.clientWidth * .8), behavior: 'smooth' }));
+    upd(); window.addEventListener('resize', upd);
+  });
+  $$('#catalog button.notify').forEach(b => b.onclick = async () => {
+    const k = b.dataset.k, on = b.classList.contains('on'); b.disabled = true;
+    try {
+      if (on) await q(sb.from('course_interest').delete().eq('user_id', me.id).eq('course_key', k));
+      else await q(sb.from('course_interest').insert({ user_id: me.id, course_key: k }));
+      const m = new Set(catOpts.mine || []); on ? m.delete(k) : m.add(k); catOpts.mine = [...m];
+      $$(`#catalog button.notify[data-k="${k}"]`).forEach(x => { x.classList.toggle('on', !on); x.textContent = on ? NOTIFY_OFF : NOTIFY_ON; });
+      if (!on) toast('Θα ενημερωθείς όταν ανοίξει το μάθημα.');
+    } catch (er) { toast(errText(er), true); } finally { b.disabled = false; }
+  });
+}
+
+const ICO = {
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9l5 3-5 3z" fill="currentColor"/></svg>',
+  cap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2.5 9 2.5 12 0v-5"/><path d="M22 9v6"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>',
+  flake: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2v20M3.3 7l17.4 10M3.3 17L20.7 7M12 2l-2 2M12 2l2 2M12 22l-2-2M12 22l2-2"/></svg>'
+};
+function landingHTML(catHTML) {
+  return `<div class="land">
+  <section class="lhero">
+    <div class="lhtext">
+      <span class="lhkicker">${ICO.flake}Cooling Systems Lab Academy</span>
+      <h1><span class="hbar" id="lhHead">${esc((curT() || {}).headline || 'Μάθε ψύξη & κλιματισμό')}</span></h1>
+      <p class="lhlead"><b class="orange">Δωρεάν</b> μαθήματα με τον δικό σου ρυθμό, δεμένα με τις διαδραστικές προσομοιώσεις του Cooling Systems Lab.</p>
+      <ul class="ticks"><li>Βίντεο ανακεφαλαίωσης σε κάθε μάθημα</li><li>Φύλλα εργασίας με λύσεις</li><li>Διαδραστικές ασκήσεις για το σπίτι ή την τάξη</li><li>Αυτοέλεγχος και η πρόοδός σου σε κάθε βήμα</li></ul>
+    </div>
+    <div class="lhimg"><img src="img/hero_photo.jpg" alt="Εκπαιδευτής και σπουδαστής μπροστά σε ψυκτική μονάδα">
+      <span class="lsticker"><small>100%</small>ΔΩΡΕΑΝ</span>
+      <div class="lhcta"><a class="btn accent big" href="#/register">Δωρεάν εγγραφή</a><a class="btn big" href="#/login"><span class="lg">Έχω ήδη λογαριασμό</span><span class="sm">Σύνδεση</span></a></div>
+    </div>
+  </section>
+  ${catHTML}
+</div>`;
+}
+
 async function studentHome(tok) {
   const [lessons, myProg] = await Promise.all([
     q(sb.from('lessons').select('id,class_id').eq('published', true)),
@@ -536,6 +631,7 @@ async function studentHome(tok) {
     F.assignments ? q(sb.from('submissions').select('assignment_id,status,points,graded_at,feedback,assignments(title,max_points,class_id)').eq('student_id', me.id)) : none(),
     F.announcements ? q(sb.from('announcements').select('id,title,created_at,class_id,classes(name)').order('created_at', { ascending: false }).limit(5)) : none()]);
   const unreadHTML = await unreadPanel();
+  const catHTML = await catalogPanel({ mine: await myInterests() });
   if (stale(tok)) return;
   const done = new Set(subs.map(s => s.assignment_id));
   const todo = asgs.filter(a => !done.has(a.id));
@@ -561,6 +657,7 @@ async function studentHome(tok) {
       ${anns.length ? `<ul class="list">${anns.map(a => `<li><a class="item" href="#/c/${a.class_id}/ann"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')} · ${fmtDay(a.created_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Καμία ανακοίνωση.</p>`}
     </div>` : ''}
   </div>` : ''}</div>`;
+  if (catHTML) { app.insertAdjacentHTML('beforeend', catHTML); bindCatalog(); }
   $('#join').onsubmit = async e => {
     e.preventDefault();
     try { const cid = await q(sb.rpc('join_class', { code: e.target.code.value })); toast('Αποκτήσατε πρόσβαση στην ενότητα.'); go('#/c/' + cid); }
@@ -587,6 +684,7 @@ async function teacherHome(tok) {
     q(sb.from('enrollments').select('class_id')),
     F.assignments ? q(sb.from('submissions').select('id,assignment_id,submitted_at,profiles(full_name),assignments(title,class_id)').is('graded_at', null).order('submitted_at')) : none()]);
   const unreadHTML = await unreadPanel();
+  const catHTML = await catalogPanel({ counts: await interestCounts() });
   if (stale(tok)) return;
   const cnt = {}; enr.forEach(e => cnt[e.class_id] = (cnt[e.class_id] || 0) + 1);
   const pc = {}; pend.forEach(p => pc[p.assignments.class_id] = (pc[p.assignments.class_id] || 0) + 1);
@@ -598,6 +696,7 @@ async function teacherHome(tok) {
   </div>${side ? `<div class="stack">${unreadHTML}${F.assignments ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
     ${pend.length ? `<ul class="list">${pend.slice(0, 12).map(p => `<li><a class="item" href="#/c/${p.assignments.class_id}/asg/${p.assignment_id}/grade/${p.id}"><span class="spacer"><b>${esc(p.profiles?.full_name || '')}</b><br><span class="muted small">${esc(p.assignments.title)} · ${fmtDay(p.submitted_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Όλα βαθμολογημένα.</p>`}
   </div>` : ''}</div>` : ''}</div>`;
+  if (catHTML) { app.insertAdjacentHTML('beforeend', catHTML); bindCatalog(); }
 }
 
 route(/^\/new-class$/, async () => {
