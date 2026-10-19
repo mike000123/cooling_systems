@@ -521,18 +521,6 @@ function catOf(classId) {
   for (const t of TRACKS) for (const [i, l] of t.levels.entries()) for (const c of l.courses) if (c.classId === classId) return { c, t, i, l };
   return null;
 }
-function myCourseCards(classes, tot, dn) {
-  const LVN = (CAT && CAT.levelNames) || [];
-  return `<div class="mygrid">${classes.map(k => {
-    const m = catOf(k.id), t = tot[k.id] || 0, d = dn[k.id] || 0;
-    const tag = m ? `${m.t.short || m.t.name} · ${m.l.name || LVN[m.i] || 'Επίπεδο ' + (m.i + 1)}` : '';
-    const desc = (m && m.c.desc) || k.description || '';
-    const btn = !t ? '' : d === t ? 'Επανάληψη →' : d ? 'Συνέχισε →' : 'Ξεκίνα →';
-    return `<a class="mycard" href="#/c/${k.id}">${tag ? `<span class="mytag">${esc(tag)}</span>` : ''}<h3>${esc(m ? m.c.name : k.name)}</h3>
-      ${desc ? `<p class="muted small cdesc">${esc(desc)}</p>` : ''}
-      ${t ? progressBar(d, t, d === t ? '🎉 Ολοκληρώθηκε' : d ? 'Η πρόοδός σου' : 'Δεν ξεκίνησες ακόμη') : '<span class="muted small">Τα πρώτα μαθήματα ανεβαίνουν σύντομα</span>'}
-      ${btn ? `<span class="btn accent small">${btn}</span>` : ''}</a>`; }).join('')}</div>`;
-}
 function classCards(list, extra) {
   if (!list.length) return '';
   return `<div class="grid">${list.map(c => `<a class="card" href="#/c/${c.id}"><h3>${esc(c.name)}</h3>
@@ -563,42 +551,70 @@ async function catalogPanel(opts) {
   if (opts) catOpts = opts;
   if (!TRACKS.length) return '';
   const T = curT(), LVN = (CAT && CAT.levelNames) || [];
+  const lvName = (l, i) => (l && l.name) || LVN[i] || 'Επίπεδο ' + (i + 1);
   const names = await loadSimNames(), mine = new Set(catOpts.mine || []), counts = catOpts.counts || null;
-  const acc = catOpts.access || null, pr = catOpts.prog || {};
+  const acc = catOpts.access || null, pr = catOpts.prog || {}, extra = catOpts.extra || [];
   const stateOf = c => !c.classId ? 'soon' : !acc ? 'open' : acc.has(c.classId) ? 'mine' : 'locked';
-  const card = c => {
+  // καρτέλα «Τα μαθήματά μου» (μόνο για συνδεδεμένο σπουδαστή)
+  const allC = TRACKS.flatMap(t => t.levels.flatMap((l, i) => l.courses.map(c => ({ c, t, l, i }))));
+  const nMyOpen = acc ? allC.filter(x => stateOf(x.c) === 'mine').length + extra.length : 0;
+  const nWait = acc ? allC.filter(x => stateOf(x.c) === 'soon' && mine.has(x.c.key)).length : 0;
+  const isMine = !!acc && (curTrack === 'mine' || (!TRACKS.some(t => t.key === curTrack) && (nMyOpen + nWait) > 0));
+  const card = (c, tag) => {
     const open = !!c.classId, st = stateOf(c), sl = (c.sims || []).filter(k => names[k]);
     const sims = sl.slice(0, 2).map(k => `<a class="simlink" href="${esc(simHref(k))}" target="_blank" rel="noopener" title="${esc(names[k])}">◎ ${esc(names[k])}</a>`).join('')
       + (sl.length > 2 ? `<span class="simmore" title="${esc(sl.slice(2).map(k => names[k]).join(' · '))}">+${sl.length - 2}</span>` : '');
     const p = pr[c.classId] || { d: 0, t: 0 };
-    const action = st === 'mine' ? `<a class="btn accent small" href="#/c/${esc(c.classId)}">${p.d && p.d === p.t ? 'Επανάληψη →' : p.d ? 'Συνέχισε →' : 'Ξεκίνα →'}</a>${p.t ? `<span class="small muted ccprog">${p.d}/${p.t} μαθήματα</span>` : ''}`
+    const action = st === 'mine' ? `<a class="btn accent small" href="#/c/${esc(c.classId)}">${p.d && p.d === p.t ? 'Επανάληψη →' : p.d ? 'Συνέχισε →' : 'Ξεκίνα →'}</a>`
       : st === 'locked' ? `<button class="btn small joinlink">🔑 Έχω κωδικό τμήματος</button>`
       : open ? `<a class="btn accent small" href="${session ? '#/c/' + esc(c.classId) : '#/register'}">${session ? 'Ξεκίνα →' : 'Εγγραφή & ξεκίνα →'}</a>`
       : counts ? `<span class="pill info">🔔 ${counts[c.key] || 0} ενδιαφέρονται</span>`
       : session ? `<button class="btn small notify${mine.has(c.key) ? ' on' : ''}" data-k="${esc(c.key)}">${mine.has(c.key) ? NOTIFY_ON : NOTIFY_OFF}</button>`
       : `<a class="btn small" href="#/register">${NOTIFY_OFF}</a>`;
-    const pill = { mine: '<span class="pill ok">✓ Ανοιχτό για σένα</span>', locked: '<span class="pill info">🔒 Με κωδικό τμήματος</span>', open: '<span class="pill ok">Διαθέσιμο</span>', soon: '<span class="pill warn">Έρχεται σύντομα</span>' }[st];
-    return `<div class="ccard${open ? ' open' : ''}${st === 'mine' ? ' mine' : ''}">${pill}
+    const pill = tag && st === 'soon' && mine.has(c.key) ? '<span class="pill warn">🔔 Σε αναμονή</span>'
+      : { mine: '<span class="pill ok">✓ Ανοιχτό για σένα</span>', locked: '<span class="pill info">🔒 Με κωδικό τμήματος</span>', open: '<span class="pill ok">Διαθέσιμο</span>', soon: '<span class="pill warn">Έρχεται σύντομα</span>' }[st];
+    const bar = st === 'mine' && p.t ? progressBar(p.d, p.t, p.d === p.t ? '🎉 Ολοκληρώθηκε' : p.d ? 'Η πρόοδός σου' : 'Δεν ξεκίνησες ακόμη') : '';
+    return `<div class="ccard${open ? ' open' : ''}${st === 'mine' ? ' mine' : ''}">${tag ? `<span class="mytag">${esc(tag)}</span>` : ''}${pill}
       <h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.desc || '')}</p>
-      ${sims ? `<div class="simlinks"><span class="small muted">${open ? 'Προσομοιώσεις:' : 'Δοκίμασε ήδη τώρα:'}</span>${sims}</div>` : ''}
-      <div class="ccact">${action}</div></div>`;
+      ${sims && !tag ? `<div class="simlinks"><span class="small muted">${open ? 'Προσομοιώσεις:' : 'Δοκίμασε ήδη τώρα:'}</span>${sims}</div>` : ''}
+      ${bar}<div class="ccact">${action}</div></div>`;
   };
-  const all = T.levels.flatMap(l => l.courses), nOpen = all.filter(c => c.classId).length;
-  const nMine = acc ? all.filter(c => stateOf(c) === 'mine').length : 0, nLock = acc ? all.filter(c => stateOf(c) === 'locked').length : 0;
-  const summary = acc ? [nMine ? `${nMine} ανοιχτ${nMine === 1 ? 'ό' : 'ά'} για σένα` : '', nLock ? `${nLock} με κωδικό` : '', `${all.length - nOpen} έρχονται σύντομα`].filter(Boolean).join(' · ')
-    : `${nOpen} διαθέσιμα · ${all.length - nOpen} έρχονται σύντομα`;
+  const section = (num, title, sub, cards) => `<section class="lvl"><div class="lvlhead"><span class="lvlnum">${num}</span><div class="spacer"><h3>${esc(title)}</h3>${sub ? `<p class="muted small">${esc(sub)}</p>` : ''}</div>
+      <span class="lvlnav"><button class="btn small" data-d="-1" aria-label="Προηγούμενα">‹</button><button class="btn small" data-d="1" aria-label="Επόμενα">›</button></span></div>
+      <div class="rail">${cards}</div></section>`;
   const lg = (cls, label, txt) => `<span class="lgi"><span class="pill ${cls}">${label}</span> ${txt}</span>`;
-  const legend = acc ? `<div class="catlegend small">${lg('ok', '✓ Ανοιχτό για σένα', 'μπορείς να το παρακολουθήσεις τώρα')}${nLock ? lg('info', '🔒 Με κωδικό τμήματος', 'θέλει κωδικό από τον εκπαιδευτή') : ''}${lg('warn', 'Έρχεται σύντομα', 'πάτα 🔔 για να ενημερωθείς')}</div>` : '';
-  const tabs = TRACKS.length > 1 ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${TRACKS.map(t => {
-      const n = t.levels.reduce((a, l) => a + l.courses.length, 0);
-      return `<button role="tab" class="ttab${t === T ? ' on' : ''}" aria-selected="${t === T}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}</nav>` : '';
-  return `<div class="panel catalog${tabs ? ' hastabs' : ''}" id="catalog">${tabs}<div class="tbody">
-    ${acc ? '<p class="catkick">Όλος ο κατάλογος μαθημάτων</p>' : ''}
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  let body;
+  if (isMine) {
+    const L = [];
+    allC.forEach(x => { const st = stateOf(x.c); if (st === 'mine' || (st === 'soon' && mine.has(x.c.key))) (L[x.i] = L[x.i] || []).push({ ...x, st }); });
+    L.forEach(xs => xs && xs.sort((a, b) => (a.st === 'mine' ? 0 : 1) - (b.st === 'mine' ? 0 : 1)));
+    const secs = L.map((xs, i) => xs && xs.length ? section(i + 1, lvName(xs[0].l, i),
+      `${plural(xs.filter(x => x.st === 'mine').length, 'ανοιχτό', 'ανοιχτά')} · ${xs.filter(x => x.st !== 'mine').length} σε αναμονή`,
+      xs.map(x => card(x.c, `${x.t.short || x.t.name} · ${lvName(x.l, x.i)}`)).join('')) : '').join('')
+      + (extra.length ? section('+', 'Άλλες ενότητες', 'Ενότητες του εκπαιδευτή σου εκτός καταλόγου',
+        extra.map(k => card({ key: 'x-' + k.id, name: k.name, classId: k.id, desc: k.description || '', sims: [] }, 'Ενότητα')).join('')) : '');
+    body = `<p class="catkick">Τα μαθήματά μου</p>
+    <div class="row between"><h2 style="margin:0">Ό,τι παρακολουθείς ή περιμένεις</h2><span class="pill">${plural(nMyOpen, 'ανοιχτό', 'ανοιχτά')} · ${nWait} σε αναμονή</span></div>
+    <p class="muted small" style="margin:4px 0 0">Τα μαθήματα που είναι ανοιχτά για σένα και όσα ζήτησες να ενημερωθείς, ανά επίπεδο. Όλη η ύλη είναι στις καρτέλες των τομέων.</p>
+    <div class="catlegend small">${lg('ok', '✓ Ανοιχτό για σένα', 'παρακολούθησέ το τώρα')}${lg('warn', '🔔 Σε αναμονή', 'θα σε ενημερώσουμε όταν ανοίξει')}</div>
+    ${secs || `<div class="empty" style="margin-top:14px">Δεν έχεις ακόμη μαθήματα εδώ. Διάλεξε έναν τομέα και πάτα «🔔 Ενημέρωσέ με» στα μαθήματα που σε ενδιαφέρουν.</div>`}`;
+  } else {
+    const all = T.levels.flatMap(l => l.courses), nOpen = all.filter(c => c.classId).length;
+    const nMine = acc ? all.filter(c => stateOf(c) === 'mine').length : 0, nLock = acc ? all.filter(c => stateOf(c) === 'locked').length : 0;
+    const summary = acc ? [nMine ? `${plural(nMine, 'ανοιχτό', 'ανοιχτά')} για σένα` : '', nLock ? `${nLock} με κωδικό` : '', `${all.length - nOpen} έρχονται σύντομα`].filter(Boolean).join(' · ')
+      : `${nOpen} διαθέσιμα · ${all.length - nOpen} έρχονται σύντομα`;
+    const legend = acc ? `<div class="catlegend small">${lg('ok', '✓ Ανοιχτό για σένα', 'μπορείς να το παρακολουθήσεις τώρα')}${nLock ? lg('info', '🔒 Με κωδικό τμήματος', 'θέλει κωδικό από τον εκπαιδευτή') : ''}${lg('warn', 'Έρχεται σύντομα', 'πάτα 🔔 για να ενημερωθείς')}</div>` : '';
+    body = `${acc ? '<p class="catkick">Κατάλογος μαθημάτων</p>' : ''}
     <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="pill">${summary}</span></div>
     <p class="muted" style="margin:6px 0 0">${all.length} μαθήματα σε ${T.levels.length} επίπεδα, από τα βασικά ως το επαγγελματικό.</p>${legend}
-    ${T.levels.map((l, i) => `<section class="lvl"><div class="lvlhead"><span class="lvlnum">${i + 1}</span><div class="spacer"><h3>${esc(l.name || LVN[i] || 'Επίπεδο ' + (i + 1))}</h3>${l.tag ? `<p class="muted small">${esc(l.tag)}</p>` : ''}</div>
-      <span class="lvlnav"><button class="btn small" data-d="-1" aria-label="Προηγούμενα">‹</button><button class="btn small" data-d="1" aria-label="Επόμενα">›</button></span></div>
-      <div class="rail">${l.courses.map(card).join('')}</div></section>`).join('')}</div></div>`;
+    ${T.levels.map((l, i) => section(i + 1, lvName(l, i), l.tag || '', l.courses.map(c => card(c)).join(''))).join('')}`;
+  }
+  const myTab = acc ? `<button role="tab" class="ttab mytab${isMine ? ' on' : ''}" aria-selected="${isMine}" data-t="mine"><b>✓ Τα μαθήματά μου</b><span>${plural(nMyOpen, 'ανοιχτό', 'ανοιχτά')} · ${nWait} σε αναμονή</span></button><div class="ttsep"></div>` : '';
+  const tabs = TRACKS.length > 1 || acc ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${myTab}${TRACKS.map(t => {
+      const n = t.levels.reduce((a, l) => a + l.courses.length, 0), on = !isMine && t === T;
+      return `<button role="tab" class="ttab${on ? ' on' : ''}" aria-selected="${on}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}</nav>` : '';
+  return `<div class="panel catalog${tabs ? ' hastabs' : ''}" id="catalog">${tabs}<div class="tbody">${body}</div></div>`;
 }
 function bindCatalog() {
   $$('#catalog .ttab').forEach(b => b.onclick = async () => {
@@ -625,6 +641,7 @@ function bindCatalog() {
       const m = new Set(catOpts.mine || []); on ? m.delete(k) : m.add(k); catOpts.mine = [...m];
       $$(`#catalog button.notify[data-k="${k}"]`).forEach(x => { x.classList.toggle('on', !on); x.textContent = on ? NOTIFY_OFF : NOTIFY_ON; });
       if (!on) toast('Θα ενημερωθείς όταν ανοίξει το μάθημα.');
+      if (curTrack === 'mine') { const html = await catalogPanel(); const old = $('#catalog'); if (old) { old.outerHTML = html; bindCatalog(); } }
     } catch (er) { toast(errText(er), true); } finally { b.disabled = false; }
   });
 }
@@ -655,8 +672,8 @@ function landingHTML(catHTML) {
 
 async function studentHome(tok) {
   const [lessons, myProg] = await Promise.all([
-    q(sb.from('lessons').select('id,class_id').eq('published', true)),
-    q(sb.from('lesson_progress').select('lesson_id,class_id').eq('user_id', me.id))]);
+    q(sb.from('lessons').select('id,class_id,title,position').eq('published', true)),
+    q(sb.from('lesson_progress').select('lesson_id,class_id,completed_at').eq('user_id', me.id))]);
   const tot = {}, dn = {}; lessons.forEach(l => tot[l.class_id] = (tot[l.class_id] || 0) + 1);
   const pubIds = new Set(lessons.map(l => l.id)); myProg.filter(p => pubIds.has(p.lesson_id)).forEach(p => dn[p.class_id] = (dn[p.class_id] || 0) + 1);
   const [classes, asgs, subs, anns] = await Promise.all([
@@ -668,34 +685,43 @@ async function studentHome(tok) {
   const pv = homePreview();
   if (pv) classes.splice(0, classes.length, ...classes.filter(c => c.is_open && !c.archived));   // όπως ένας νέος χρήστης: μόνο ανοιχτές ενότητες
   const prog = {}; classes.forEach(c => prog[c.id] = { d: dn[c.id] || 0, t: tot[c.id] || 0 });
-  const catHTML = await catalogPanel({ mine: await myInterests(), access: new Set(classes.map(c => c.id)), prog });
+  const extra = classes.filter(c => !catOf(c.id) && !c.archived);   // ενότητες εκτός καταλόγου
+  const catHTML = await catalogPanel({ mine: await myInterests(), access: new Set(classes.map(c => c.id)), prog, extra });
   if (stale(tok)) return;
+  // «Συνέχισε από εκεί που σταμάτησες»: η ενότητα με την πιο πρόσφατη ολοκλήρωση που δεν έχει τελειώσει
+  let resume = '';
+  const cids = new Set(classes.map(c => c.id));
+  for (const p of myProg.filter(p => pubIds.has(p.lesson_id) && cids.has(p.class_id)).sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0))) {
+    const cid = p.class_id; if ((dn[cid] || 0) >= (tot[cid] || 0)) continue;
+    const doneSet = new Set(myProg.filter(x => x.class_id === cid).map(x => x.lesson_id));
+    const next = lessons.filter(l => l.class_id === cid && !doneSet.has(l.id)).sort((a, b) => a.position - b.position)[0];
+    if (!next) continue;
+    const m = catOf(cid), cname = m ? m.c.name : (classes.find(c => c.id === cid) || {}).name || '';
+    resume = `<a class="resume" href="#/c/${cid}/lesson/${next.id}"><div class="rt"><small>Συνέχισε από εκεί που σταμάτησες</small><b>${esc(cname)} — ${esc(next.title)}</b>${progressBar(dn[cid] || 0, tot[cid], 'Η πρόοδός σου')}</div><span class="btn accent">Συνέχισε →</span></a>`;
+    break;
+  }
   const done = new Set(subs.map(s => s.assignment_id));
   const todo = asgs.filter(a => !done.has(a.id));
   const graded = subs.filter(s => s.status === 'returned').sort((a, b) => new Date(b.graded_at) - new Date(a.graded_at)).slice(0, 5);
-  const side = F.assignments || F.announcements || unreadHTML;
+  const panels = [
+    F.assignments ? `<div class="panel"><h2>Εκκρεμείς εργασίες</h2>
+      ${todo.length ? `<ul class="list">${todo.map(a => `<li><a class="item" href="#/c/${a.class_id}/asg/${a.id}"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')}</span></span>${duePill(a)}</a></li>`).join('')}</ul>` : `<p class="muted">Καμία εκκρεμότητα.</p>`}
+    </div>` : '',
+    unreadHTML,
+    F.assignments ? `<div class="panel"><h2>Ανατροφοδότηση</h2>
+      ${graded.length ? `<ul class="list">${graded.map(s => `<li><a class="item" href="#/c/${s.assignments.class_id}/asg/${s.assignment_id}"><span class="spacer">${esc(s.assignments.title)}</span><span class="pill ok">${s.points != null ? num(s.points) + '/' + num(s.assignments.max_points) : 'Σχόλια'}</span></a></li>`).join('')}</ul>` : `<p class="muted small">Δεν υπάρχει ακόμη.</p>`}
+    </div>` : '',
+    F.announcements ? `<div class="panel"><h2>Ανακοινώσεις</h2>
+      ${anns.length ? `<ul class="list">${anns.map(a => `<li><a class="item" href="#/c/${a.class_id}/ann"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')} · ${fmtDay(a.created_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Καμία ανακοίνωση.</p>`}
+    </div>` : ''].filter(Boolean);
   app.innerHTML = `${pv ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε την αρχική όπως ένας χρήστης (μόνο ανοιχτές ενότητες, χωρίς πρόχειρα). Η πρόοδος είναι η δική σας.</span><span class="row"><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : ''}
   <div class="row between"><h1>Γεια σας, ${esc(me.full_name.split(' ')[0])}</h1></div>
-  <div class="${side ? 'two' : ''}"><div class="stack">
-    <div class="panel"><h2 style="margin-bottom:2px">Τα μαθήματά μου</h2><p class="muted small" style="margin:0 0 12px">Ανοιχτά για σένα — μπορείς να τα παρακολουθήσεις τώρα.</p>
-      ${classes.length ? myCourseCards(classes, tot, dn)
-        : `<div class="empty">Δεν υπάρχει ακόμη διαθέσιμο υλικό. Δες παρακάτω τον κατάλογο και πάτα 🔔 στα μαθήματα που σε ενδιαφέρουν.</div>`}
-      <details id="joinbox" style="margin-top:14px"><summary class="muted small" style="cursor:pointer">Έχεις κωδικό τμήματος από τον εκπαιδευτή σου;</summary>
-      <form class="row" id="join" style="margin-top:8px"><input class="inp" name="code" placeholder="Κωδικός ενότητας" maxlength="12" style="max-width:220px;text-transform:uppercase" required><button class="btn">Είσοδος</button></form></details>
-    </div>
-    ${F.assignments ? `<div class="panel"><h2>Εκκρεμείς εργασίες</h2>
-      ${todo.length ? `<ul class="list">${todo.map(a => `<li><a class="item" href="#/c/${a.class_id}/asg/${a.id}"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')}</span></span>${duePill(a)}</a></li>`).join('')}</ul>` : `<p class="muted">Καμία εκκρεμότητα.</p>`}
-    </div>` : ''}
-  </div>${side ? `<div class="stack">
-    ${unreadHTML}
-    ${F.assignments ? `<div class="panel"><h2>Ανατροφοδότηση</h2>
-      ${graded.length ? `<ul class="list">${graded.map(s => `<li><a class="item" href="#/c/${s.assignments.class_id}/asg/${s.assignment_id}"><span class="spacer">${esc(s.assignments.title)}</span><span class="pill ok">${s.points != null ? num(s.points) + '/' + num(s.assignments.max_points) : 'Σχόλια'}</span></a></li>`).join('')}</ul>` : `<p class="muted small">Δεν υπάρχει ακόμη.</p>`}
-    </div>` : ''}
-    ${F.announcements ? `<div class="panel"><h2>Ανακοινώσεις</h2>
-      ${anns.length ? `<ul class="list">${anns.map(a => `<li><a class="item" href="#/c/${a.class_id}/ann"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')} · ${fmtDay(a.created_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Καμία ανακοίνωση.</p>`}
-    </div>` : ''}
-  </div>` : ''}</div>`;
-  if (catHTML) { app.insertAdjacentHTML('beforeend', catHTML); bindCatalog(); }
+  ${resume}
+  ${panels.length ? `<div class="${panels.length > 1 ? 'two' : ''}">${panels.join('')}</div>` : ''}
+  ${catHTML}
+  <details id="joinbox" class="joinbox"><summary class="muted small">Έχεις κωδικό τμήματος από τον εκπαιδευτή σου;</summary>
+    <form class="row" id="join" style="margin-top:8px"><input class="inp" name="code" placeholder="Κωδικός ενότητας" maxlength="12" style="max-width:220px;text-transform:uppercase" required><button class="btn">Είσοδος</button></form></details>`;
+  if (catHTML) bindCatalog();
   $('#join').onsubmit = async e => {
     e.preventDefault();
     try { const cid = await q(sb.rpc('join_class', { code: e.target.code.value })); toast('Αποκτήσατε πρόσβαση στην ενότητα.'); go('#/c/' + cid); }
@@ -1628,8 +1654,20 @@ function bindChart() {
 route(/^\/admin$/, async tok => {
   if (needLogin()) return;
   if (!isTeacher()) return go('#/');
-  const o = await q(sb.rpc('admin_overview')); if (stale(tok)) return;
+  const [o, intr] = await Promise.all([q(sb.rpc('admin_overview')), sb.rpc('admin_interest').then(r => r.error ? null : (r.data || []), () => null)]);
+  if (stale(tok)) return;
   const k = o.kpi, del = o.deleted || {};
+  // ενδιαφέρον για μαθήματα που έρχονται (catalog.js): ομαδοποίηση ανά μάθημα
+  const cName = key => { for (const t of TRACKS) for (const l of t.levels) for (const c of l.courses) if (c.key === key) return c.name; return key; };
+  const byC = {}; (intr || []).forEach(r => (byC[r.course_key] = byC[r.course_key] || []).push(r));
+  const cKeys = Object.keys(byC).sort((a, b) => byC[b].length - byC[a].length);
+  const intrHTML = intr === null
+    ? `<p class="muted small">Για να δείτε ποιοι ζήτησαν ενημέρωση, τρέξτε το <code>update_08_interest_list.sql</code> στο Supabase (SQL Editor).</p>`
+    : !cKeys.length ? `<p class="muted small">Κανείς δεν έχει ζητήσει ακόμη ενημέρωση.</p>`
+    : cKeys.map(key => `<details class="intr"><summary><b>${esc(cName(key))}</b> <span class="pill info">🔔 ${byC[key].length}</span></summary>
+        <div class="row" style="margin:8px 0"><button class="btn small" data-copy="${esc(key)}">Αντιγραφή email</button><a class="btn small" href="mailto:?bcc=${encodeURIComponent(byC[key].map(r => r.email).join(','))}&subject=${encodeURIComponent('Άνοιξε το μάθημα: ' + cName(key))}">✉ Email (Bcc)</a></div>
+        <div class="tablewrap"><table class="t"><thead><tr><th>Όνομα</th><th>Email</th><th>Δήλωση</th></tr></thead><tbody>
+        ${byC[key].map(r => `<tr><td>${esc(r.full_name || '')}</td><td class="muted">${esc(r.email || '')}</td><td>${fmtDay(r.created_at)}</td></tr>`).join('')}</tbody></table></div></details>`).join('');
   const delAny = (del.views || 0) + (del.completions || 0) + (del.downloads || 0) + (del.videos || 0) + (del.sims || 0);
   app.innerHTML = `<p class="small"><a href="#/">← Οι ενότητές μου</a></p>
   <div class="row between"><h1>📊 Στατιστικά</h1><button class="btn small" id="csvu">Λήψη χρηστών (CSV)</button></div>
@@ -1645,6 +1683,8 @@ route(/^\/admin$/, async tok => {
   <div class="panel"><h2>Ανά μάθημα</h2><p class="muted small" style="margin:0 0 6px">Πατήστε στον τίτλο μιας στήλης για ταξινόμηση.</p><div class="tablewrap"><table class="t" id="lt"><thead><tr><th>Μάθημα</th><th>Ενότητα</th><th class="n">Προβολές</th><th class="n">Μοναδικοί</th><th class="n">Ολοκληρώσεις</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody>
     ${o.lessons.map(l => `<tr><td>${esc(l.title)}</td><td class="muted">${esc(l.class_name)}</td><td class="n">${l.views}</td><td class="n">${l.viewers}</td><td class="n">${l.completions}</td><td class="n">${l.downloads}</td><td class="n">${l.videos}</td><td class="n">${l.sims}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Δεν υπάρχουν δημοσιευμένα μαθήματα.</td></tr>'}
   </tbody></table></div></div>
+  <div class="panel"><div class="row between"><h2 style="margin:0">🔔 Ενδιαφέρον για μαθήματα που έρχονται</h2>${cKeys.length ? '<button class="btn small" id="csvi">Λήψη (CSV)</button>' : ''}</div>
+    <p class="muted small" style="margin:4px 0 8px">Ποιοι πάτησαν «Ενημέρωσέ με όταν ανοίξει». Όταν ανοίξει το μάθημα, στείλτε τους email με τους παραλήπτες σε Bcc.</p>${intrHTML}</div>
   <div class="panel"><div class="row between"><h2 style="margin:0">Χρήστες (${o.people.length})</h2><input class="inp" id="uq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:280px"></div>
   <div class="tablewrap" style="margin-top:10px"><table class="t" id="pt"><thead><tr><th>Όνομα</th><th>Email</th><th data-d="1">Εγγραφή</th><th data-d="1">Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
     ${o.people.map(p => `<tr class="click" data-u="${p.id}" data-s="${esc((p.full_name + ' ' + p.email).toLowerCase())}"><td>${esc(p.full_name)}</td><td class="muted">${esc(p.email)}</td><td data-v="${esc(p.created_at || '')}">${fmtDay(p.created_at)}</td><td data-v="${esc(p.last_activity || '')}">${relDay(p.last_activity)}</td><td class="n">${p.completions}</td><td class="n">${p.downloads}</td><td class="n">${p.videos}</td><td class="n">${p.sims}</td></tr>`).join('')}
@@ -1655,6 +1695,17 @@ route(/^\/admin$/, async tok => {
   sortable($('#lt')); sortable($('#pt'));
   $$('#ub tr.click').forEach(r => r.onclick = () => go('#/admin/u/' + r.dataset.u));
   $('#uq').oninput = e => { const v = e.target.value.trim().toLowerCase(); $$('#ub tr').forEach(r => r.hidden = !!v && !(r.dataset.s || '').includes(v)); };
+  $$('[data-copy]').forEach(b => b.onclick = async () => {
+    const t = byC[b.dataset.copy].map(r => r.email).join(', ');
+    try { await navigator.clipboard.writeText(t); toast('Αντιγράφηκαν ' + byC[b.dataset.copy].length + ' email.'); } catch (e) { prompt('Αντιγράψτε τα email:', t); }
+  });
+  if ($('#csvi')) $('#csvi').onclick = () => {
+    const cell = v => { v = String(v ?? ''); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const rows = [['Μάθημα', 'Όνομα', 'Email', 'Δήλωση']];
+    cKeys.forEach(key => byC[key].forEach(r => rows.push([cName(key), r.full_name, r.email, fmtDay(r.created_at)])));
+    const blob = new Blob(['\ufeff' + rows.map(r => r.map(cell).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'academy-endiaferon.csv'; a.click();
+  };
   $('#csvu').onclick = () => {
     const cell = v => { v = String(v ?? ''); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     const rows = [['Όνομα', 'Email', 'Εγγραφή', 'Τελευταία δραστηριότητα', 'Ολοκληρώσεις', 'Αρχεία', 'Βίντεο', 'Προσομοιώσεις']];
