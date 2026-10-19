@@ -553,13 +553,16 @@ async function catalogPanel(opts) {
   const T = curT(), LVN = (CAT && CAT.levelNames) || [];
   const lvName = (l, i) => (l && l.name) || LVN[i] || 'Επίπεδο ' + (i + 1);
   const names = await loadSimNames(), mine = new Set(catOpts.mine || []), counts = catOpts.counts || null;
-  const acc = catOpts.access || null, pr = catOpts.prog || {}, extra = catOpts.extra || [];
+  const acc = catOpts.access || null, pr = catOpts.prog || {}, extra = catOpts.extra || [], teach = catOpts.teach || null;
   const stateOf = c => !c.classId ? 'soon' : !acc ? 'open' : acc.has(c.classId) ? 'mine' : 'locked';
   // καρτέλα «Τα μαθήματά μου» (μόνο για συνδεδεμένο σπουδαστή)
   const allC = TRACKS.flatMap(t => t.levels.flatMap((l, i) => l.courses.map(c => ({ c, t, l, i }))));
   const nMyOpen = acc ? allC.filter(x => stateOf(x.c) === 'mine').length + extra.length : 0;
   const nWait = acc ? allC.filter(x => stateOf(x.c) === 'soon' && mine.has(x.c.key)).length : 0;
-  const isMine = !!acc && (curTrack === 'mine' || (!TRACKS.some(t => t.key === curTrack) && (nMyOpen + nWait) > 0));
+  const nDemand = teach && counts ? allC.filter(x => !x.c.classId && counts[x.c.key]).length : 0;
+  // στην αρχική ανοίγει πρώτα η «δική μου» καρτέλα, εκτός αν ο χρήστης διάλεξε τομέα σε αυτή την επίσκεψη
+  const picked = (() => { try { return sessionStorage.getItem('csl-track-pick') === '1'; } catch (e) { return false; } })();
+  const isMine = (!!acc || !!teach) && (curTrack === 'mine' || ((!picked || !TRACKS.some(t => t.key === curTrack)) && (teach || (nMyOpen + nWait) > 0)));
   const card = (c, tag) => {
     const open = !!c.classId, st = stateOf(c), sl = (c.sims || []).filter(k => names[k]);
     const sims = sl.slice(0, 2).map(k => `<a class="simlink" href="${esc(simHref(k))}" target="_blank" rel="noopener" title="${esc(names[k])}">◎ ${esc(names[k])}</a>`).join('')
@@ -585,7 +588,33 @@ async function catalogPanel(opts) {
   const lg = (cls, label, txt) => `<span class="lgi"><span class="pill ${cls}">${label}</span> ${txt}</span>`;
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   let body;
-  if (isMine) {
+  if (isMine && teach) {
+    // εκπαιδευτής: οι ενότητές του ανά επίπεδο + μαθήματα του καταλόγου με ζήτηση
+    const tcard = (k, tag) => {
+      const m = catOf(k.id);
+      const pills = `${k.is_open ? '<span class="pill ok">Ανοιχτή σε όλους</span>' : `<span class="pill">Κλειστή · ${teach.cnt[k.id] || 0} μέλη</span>`}${teach.pc[k.id] ? `<span class="pill warn">${teach.pc[k.id]} προς βαθμολόγηση</span>` : ''}${k.archived ? '<span class="pill">Αρχειοθετημένο</span>' : ''}`;
+      return `<a class="ccard open tcl" href="#/c/${esc(k.id)}">${tag ? `<span class="mytag">${esc(tag)}</span>` : ''}<div class="row" style="gap:6px">${pills}</div>
+        <h3>${esc(m ? m.c.name : k.name)}</h3><p class="muted small cdesc">${esc((m && m.c.desc) || k.description || '')}</p>
+        <div class="ccact"><span class="btn accent small">Άνοιγμα →</span></div></a>`;
+    };
+    const L = [], other = [];
+    teach.classes.forEach(k => { const m = catOf(k.id); if (m) (L[m.i] = L[m.i] || []).push({ k, m }); else other.push(k); });
+    const dem = []; allC.forEach(x => { if (!x.c.classId && counts && counts[x.c.key]) (dem[x.i] = dem[x.i] || []).push(x); });
+    dem.forEach(xs => xs && xs.sort((a, b) => counts[b.c.key] - counts[a.c.key]));
+    const nLv = Math.max(L.length, dem.length);
+    let secs = '';
+    for (let i = 0; i < nLv; i++) {
+      const a = L[i] || [], d = dem[i] || []; if (!a.length && !d.length) continue;
+      const lv = (a[0] && a[0].m.l) || (d[0] && d[0].l);
+      secs += section(i + 1, lvName(lv, i), `${plural(a.length, 'ενότητα', 'ενότητες')} · ${d.length} με ζήτηση`,
+        a.map(x => tcard(x.k, `${x.m.t.short || x.m.t.name} · ${lvName(x.m.l, x.m.i)}`)).join('') + d.map(x => card(x.c, `${x.t.short || x.t.name} · ${lvName(x.l, x.i)}`)).join(''));
+    }
+    if (other.length) secs += section('+', 'Άλλες ενότητες', 'Εκτός καταλόγου', other.map(k => tcard(k, '')).join(''));
+    body = `<p class="catkick">Οι ενότητές μου</p>
+    <div class="row between"><h2 style="margin:0">Ό,τι διαχειρίζεστε</h2><span class="pill">${plural(teach.classes.length, 'ενότητα', 'ενότητες')} · ${nDemand} μαθήματα με ζήτηση</span></div>
+    <p class="muted small" style="margin:4px 0 0">Οι ενότητές σας ανά επίπεδο και, δίπλα τους, τα μαθήματα του καταλόγου που ζήτησαν οι χρήστες («🔔 N ενδιαφέρονται»). Ποιοι ακριβώς: 📊 Στατιστικά.</p>
+    ${secs || `<div class="empty" style="margin-top:14px">Δεν έχετε ενότητες ακόμη. Φτιάξτε την πρώτη με «+ Νέα ενότητα».</div>`}`;
+  } else if (isMine) {
     const L = [];
     allC.forEach(x => { const st = stateOf(x.c); if (st === 'mine' || (st === 'soon' && mine.has(x.c.key))) (L[x.i] = L[x.i] || []).push({ ...x, st }); });
     L.forEach(xs => xs && xs.sort((a, b) => (a.st === 'mine' ? 0 : 1) - (b.st === 'mine' ? 0 : 1)));
@@ -610,15 +639,16 @@ async function catalogPanel(opts) {
     <p class="muted" style="margin:6px 0 0">${all.length} μαθήματα σε ${T.levels.length} επίπεδα, από τα βασικά ως το επαγγελματικό.</p>${legend}
     ${T.levels.map((l, i) => section(i + 1, lvName(l, i), l.tag || '', l.courses.map(c => card(c)).join(''))).join('')}`;
   }
-  const myTab = acc ? `<button role="tab" class="ttab mytab${isMine ? ' on' : ''}" aria-selected="${isMine}" data-t="mine"><b>✓ Τα μαθήματά μου</b><span>${plural(nMyOpen, 'ανοιχτό', 'ανοιχτά')} · ${nWait} σε αναμονή</span></button><div class="ttsep"></div>` : '';
-  const tabs = TRACKS.length > 1 || acc ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${myTab}${TRACKS.map(t => {
+  const myTab = teach ? `<button role="tab" class="ttab mytab${isMine ? ' on' : ''}" aria-selected="${isMine}" data-t="mine"><b>✓ Οι ενότητές μου</b><span>${plural(teach.classes.length, 'ενότητα', 'ενότητες')} · ${nDemand} με ζήτηση</span></button><div class="ttsep"></div>`
+    : acc ? `<button role="tab" class="ttab mytab${isMine ? ' on' : ''}" aria-selected="${isMine}" data-t="mine"><b>✓ Τα μαθήματά μου</b><span>${plural(nMyOpen, 'ανοιχτό', 'ανοιχτά')} · ${nWait} σε αναμονή</span></button><div class="ttsep"></div>` : '';
+  const tabs = TRACKS.length > 1 || acc || teach ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${myTab}${TRACKS.map(t => {
       const n = t.levels.reduce((a, l) => a + l.courses.length, 0), on = !isMine && t === T;
       return `<button role="tab" class="ttab${on ? ' on' : ''}" aria-selected="${on}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}</nav>` : '';
   return `<div class="panel catalog${tabs ? ' hastabs' : ''}" id="catalog">${tabs}<div class="tbody">${body}</div></div>`;
 }
 function bindCatalog() {
   $$('#catalog .ttab').forEach(b => b.onclick = async () => {
-    curTrack = b.dataset.t; try { localStorage.setItem('csl-track', curTrack); } catch (e) { }
+    curTrack = b.dataset.t; try { localStorage.setItem('csl-track', curTrack); sessionStorage.setItem('csl-track-pick', '1'); } catch (e) { }
     const html = await catalogPanel(); const old = $('#catalog'); if (!old) return;
     old.outerHTML = html; const h = $('#lhHead'); if (h) h.textContent = curT().headline || '';
     bindCatalog();
@@ -748,19 +778,17 @@ async function teacherHome(tok) {
     q(sb.from('enrollments').select('class_id')),
     F.assignments ? q(sb.from('submissions').select('id,assignment_id,submitted_at,profiles(full_name),assignments(title,class_id)').is('graded_at', null).order('submitted_at')) : none()]);
   const unreadHTML = await unreadPanel();
-  const catHTML = await catalogPanel({ counts: await interestCounts() });
-  if (stale(tok)) return;
   const cnt = {}; enr.forEach(e => cnt[e.class_id] = (cnt[e.class_id] || 0) + 1);
   const pc = {}; pend.forEach(p => pc[p.assignments.class_id] = (pc[p.assignments.class_id] || 0) + 1);
-  const side = F.assignments || unreadHTML;
-  app.innerHTML = `<div class="row between"><h1>Οι ενότητές μου</h1><span class="row"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn" href="#/admin">📊 Στατιστικά</a><a class="btn accent" href="#/new-class">+ Νέα ενότητα</a></span></div>
-  <div class="${side ? 'two' : ''}"><div class="panel">
-    ${classes.length ? classCards(classes, c => `<div class="row">${c.is_open ? '<span class="pill ok">Ανοιχτή σε όλους</span>' : `<span class="pill">Κλειστή · ${cnt[c.id] || 0} μέλη</span>`}${pc[c.id] ? `<span class="pill warn">${pc[c.id]} προς βαθμολόγηση</span>` : ''}${c.archived ? '<span class="pill">Αρχειοθετημένο</span>' : ''}</div>`)
-      : `<div class="empty">Δεν έχετε ενότητες ακόμη. Φτιάξτε την πρώτη και προσθέστε μαθήματα.</div>`}
-  </div>${side ? `<div class="stack">${unreadHTML}${F.assignments ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
+  const catHTML = await catalogPanel({ counts: await interestCounts(), teach: { classes, cnt, pc } });
+  if (stale(tok)) return;
+  const panels = [unreadHTML, F.assignments ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
     ${pend.length ? `<ul class="list">${pend.slice(0, 12).map(p => `<li><a class="item" href="#/c/${p.assignments.class_id}/asg/${p.assignment_id}/grade/${p.id}"><span class="spacer"><b>${esc(p.profiles?.full_name || '')}</b><br><span class="muted small">${esc(p.assignments.title)} · ${fmtDay(p.submitted_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Όλα βαθμολογημένα.</p>`}
-  </div>` : ''}</div>` : ''}</div>`;
-  if (catHTML) { app.insertAdjacentHTML('beforeend', catHTML); bindCatalog(); }
+  </div>` : ''].filter(Boolean);
+  app.innerHTML = `<div class="row between"><h1>Οι ενότητές μου</h1><span class="row"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn" href="#/admin">📊 Στατιστικά</a><a class="btn accent" href="#/new-class">+ Νέα ενότητα</a></span></div>
+  ${panels.length ? `<div class="${panels.length > 1 ? 'two' : ''}">${panels.join('')}</div>` : ''}
+  ${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}`;
+  if (catHTML) bindCatalog();
 }
 
 route(/^\/new-class$/, async () => {

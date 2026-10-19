@@ -333,3 +333,5 @@ body.viewing{overflow:hidden}
 .joinbox{margin:6px 4px 0}.joinbox summary{cursor:pointer}
 @media (max-width:720px){.resume{flex-wrap:wrap}.ttabs{flex-wrap:wrap}.ttab{flex:1 1 40%}.ttsep{display:none}}
 .lvlnav[hidden]{display:none}
+.ccard.tcl{text-decoration:none;color:var(--ink);background:#fff}
+.ccard.tcl:hover{box-shadow:0 0 0 3px rgba(226,103,43,.22)}
