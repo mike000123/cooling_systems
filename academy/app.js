@@ -1803,7 +1803,8 @@ function bindChart() {
 route(/^\/(?:admin|me\/stats)$/, async tok => {
   if (needLogin()) return;
   if (!isTeacher()) return go('#/');
-  const [o, intr] = await Promise.all([q(sb.rpc('admin_overview')), sb.rpc('admin_interest').then(r => r.error ? null : (r.data || []), () => null)]);
+  const [o, intr, gone] = await Promise.all([q(sb.rpc('admin_overview')), sb.rpc('admin_interest').then(r => r.error ? null : (r.data || []), () => null),
+    sb.rpc('admin_accounts').then(r => r.error ? null : (r.data || []), () => null)]);
   if (stale(tok)) return;
   const k = o.kpi, del = o.deleted || {};
   // ενδιαφέρον για μαθήματα που έρχονται (catalog.js): ομαδοποίηση ανά μάθημα
@@ -1817,10 +1818,11 @@ route(/^\/(?:admin|me\/stats)$/, async tok => {
         <div class="row" style="margin:8px 0"><button class="btn small" data-copy="${esc(key)}">Αντιγραφή email</button><a class="btn small" href="mailto:?bcc=${encodeURIComponent(byC[key].map(r => r.email).join(','))}&subject=${encodeURIComponent('Άνοιξε το μάθημα: ' + cName(key))}">✉ Email (Bcc)</a></div>
         <div class="tablewrap"><table class="t"><thead><tr><th>Όνομα</th><th>Email</th><th>Δήλωση</th></tr></thead><tbody>
         ${byC[key].map(r => `<tr><td>${esc(r.full_name || '')}</td><td class="muted">${esc(r.email || '')}</td><td>${fmtDay(r.created_at)}</td></tr>`).join('')}</tbody></table></div></details>`).join('');
+  const goneN = (gone || []).length, gone30 = (gone || []).filter(g => Date.now() - new Date(g.deleted_at) < 30 * 864e5).length;
   const delAny = (del.views || 0) + (del.completions || 0) + (del.downloads || 0) + (del.videos || 0) + (del.sims || 0);
   app.innerHTML = meLayout('stats', `<div class="row between"><h1 style="margin-top:0">📊 Στατιστικά</h1><button class="btn small" id="csvu">Λήψη χρηστών (CSV)</button></div>
   <div class="tiles">
-    ${tile(k.users, 'εγγεγραμμένοι χρήστες', `+${k.new7} τις τελευταίες 7 μέρες`)}
+    ${tile(k.users, 'εγγεγραμμένοι χρήστες', `+${k.new7} τις τελευταίες 7 μέρες${gone ? ` · ${goneN} διαγραφ${goneN === 1 ? 'ή' : 'ές'}${gone30 ? ` (${gone30} τον τελευταίο μήνα)` : ''}` : ''}`)}
     ${tile(k.active7, 'ενεργοί (7 ημέρες)', 'με τουλάχιστον μία ενέργεια')}
     ${tile(k.completions, 'ολοκληρώσεις μαθημάτων')}
     ${tile(k.downloads, 'ανοίγματα αρχείων')}
@@ -1833,12 +1835,13 @@ route(/^\/(?:admin|me\/stats)$/, async tok => {
   </tbody></table></div></div>
   <div class="panel"><div class="row between"><h2 style="margin:0">🔔 Ενδιαφέρον για μαθήματα που έρχονται</h2>${cKeys.length ? '<button class="btn small" id="csvi">Λήψη (CSV)</button>' : ''}</div>
     <p class="muted small" style="margin:4px 0 8px">Ποιοι πάτησαν «Ενημέρωσέ με όταν ανοίξει». Όταν ανοίξει το μάθημα, στείλτε τους email με τους παραλήπτες σε Bcc.</p>${intrHTML}</div>
-  <div class="panel"><div class="row between"><h2 style="margin:0">Χρήστες (${o.people.length})</h2><input class="inp" id="uq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:280px"></div>
-  <div class="tablewrap" style="margin-top:10px"><table class="t" id="pt"><thead><tr><th>Όνομα</th><th>Email</th><th data-d="1">Εγγραφή</th><th data-d="1">Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
-    ${o.people.map(p => `<tr class="click" data-u="${p.id}" data-s="${esc((p.full_name + ' ' + p.email).toLowerCase())}"><td>${esc(p.full_name)}</td><td class="muted">${esc(p.email)}</td><td data-v="${esc(p.created_at || '')}">${fmtDay(p.created_at)}</td><td data-v="${esc(p.last_activity || '')}">${relDay(p.last_activity)}</td><td class="n">${p.completions}</td><td class="n">${p.downloads}</td><td class="n">${p.videos}</td><td class="n">${p.sims}</td></tr>`).join('')}
-    ${delAny ? `<tr class="click deleted" data-u="deleted" data-s=""><td colspan="4"><i>Διαγραμμένοι χρήστες (ανώνυμα)</i></td><td class="n">${del.completions}</td><td class="n">${del.downloads}</td><td class="n">${del.videos}</td><td class="n">${del.sims}</td></tr>` : ''}
+  <div class="panel"><div class="row between"><h2 style="margin:0">Χρήστες (${o.people.length})${goneN ? ` <span class="muted small">· ${goneN} διαγραμμένοι</span>` : ''}</h2><input class="inp" id="uq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:280px"></div>
+  <div class="tablewrap" style="margin-top:10px"><table class="t" id="pt"><thead><tr><th>Όνομα</th><th>Email</th><th data-d="1">Εγγραφή</th><th data-d="1">Διαγραφή</th><th data-d="1">Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
+    ${o.people.map(p => `<tr class="click" data-u="${p.id}" data-s="${esc((p.full_name + ' ' + p.email).toLowerCase())}"><td>${esc(p.full_name)}</td><td class="muted">${esc(p.email)}</td><td data-v="${esc(p.created_at || '')}">${fmtDay(p.created_at)}</td><td data-v="" class="muted">—</td><td data-v="${esc(p.last_activity || '')}">${relDay(p.last_activity)}</td><td class="n">${p.completions}</td><td class="n">${p.downloads}</td><td class="n">${p.videos}</td><td class="n">${p.sims}</td></tr>`).join('')}
+    ${(gone || []).map(g => `<tr class="deleted" data-s=""><td style="white-space:nowrap"><i>Διαγραμμένος λογαριασμός</i></td><td class="muted">—</td><td data-v="${esc(g.signed_up_at || '')}">${fmtDay(g.signed_up_at)}</td><td data-v="${esc(g.deleted_at || '')}">${fmtDay(g.deleted_at)}</td><td data-v="" class="muted">—</td><td colspan="4"></td></tr>`).join('')}
+    ${delAny ? `<tr class="click deleted" data-u="deleted" data-s=""><td colspan="5"><i>Διαγραμμένοι χρήστες (ανώνυμα)</i></td><td class="n">${del.completions}</td><td class="n">${del.downloads}</td><td class="n">${del.videos}</td><td class="n">${del.sims}</td></tr>` : ''}
   </tbody></table></div>
-  <p class="muted small">Τα «βίντεο» μετρούν τα κλικ για άνοιγμα στο YouTube, όχι τον χρόνο παρακολούθησης. Όταν ένας χρήστης διαγράφει τον λογαριασμό του, η δραστηριότητά του παραμένει μόνο ανώνυμα στα σύνολα.</p></div>`);
+  <p class="muted small">Τα «βίντεο» μετρούν τα κλικ για άνοιγμα στο YouTube, όχι τον χρόνο παρακολούθησης. Όταν ένας χρήστης διαγράφει τον λογαριασμό του, η δραστηριότητά του παραμένει μόνο ανώνυμα στα σύνολα· κρατιούνται μόνο οι ημερομηνίες εγγραφής και διαγραφής, χωρίς όνομα ή email.${gone === null ? ' Για να εμφανίζονται οι διαγραφές, τρέξτε το <code>update_10_account_log.sql</code> στο Supabase (SQL Editor).' : ''}</p></div>`);
   bindChart();
   sortable($('#lt')); sortable($('#pt'));
   $$('#ub tr.click').forEach(r => r.onclick = () => go('#/admin/u/' + r.dataset.u));
@@ -1856,8 +1859,9 @@ route(/^\/(?:admin|me\/stats)$/, async tok => {
   };
   $('#csvu').onclick = () => {
     const cell = v => { v = String(v ?? ''); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    const rows = [['Όνομα', 'Email', 'Εγγραφή', 'Τελευταία δραστηριότητα', 'Ολοκληρώσεις', 'Αρχεία', 'Βίντεο', 'Προσομοιώσεις']];
-    o.people.forEach(p => rows.push([p.full_name, p.email, fmtDay(p.created_at), p.last_activity ? fmtDate(p.last_activity) : '', p.completions, p.downloads, p.videos, p.sims]));
+    const rows = [['Όνομα', 'Email', 'Εγγραφή', 'Διαγραφή', 'Τελευταία δραστηριότητα', 'Ολοκληρώσεις', 'Αρχεία', 'Βίντεο', 'Προσομοιώσεις']];
+    o.people.forEach(p => rows.push([p.full_name, p.email, fmtDay(p.created_at), '', p.last_activity ? fmtDate(p.last_activity) : '', p.completions, p.downloads, p.videos, p.sims]));
+    (gone || []).forEach(g => rows.push(['(διαγραμμένος λογαριασμός)', '', fmtDay(g.signed_up_at), fmtDay(g.deleted_at), '', '', '', '', '']));
     const blob = new Blob(['﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'academy-xristes.csv'; a.click();
   };
