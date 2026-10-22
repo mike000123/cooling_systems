@@ -709,7 +709,7 @@ async function catalogPanel(opts) {
     if (other.length) secs += section('+', 'Άλλες ενότητες', 'Εκτός καταλόγου', other.map(k => tcard(k, '')).join(''));
     body = `<div class="row between"><h2 style="margin:0">Οι ενότητές μου</h2><span class="pill">${plural(teach.classes.length, 'ενότητα', 'ενότητες')} · ${nDemand} μαθήματα με ζήτηση</span></div>
     <p class="muted small" style="margin:4px 0 0">Οι ενότητές σας ανά επίπεδο και, δίπλα τους, τα μαθήματα του καταλόγου που ζήτησαν οι χρήστες («🔔 N ενδιαφέρονται»). Ποιοι ακριβώς: 📊 Στατιστικά.</p>
-    ${secs || `<div class="empty" style="margin-top:14px">Δεν έχετε ενότητες ακόμη. Φτιάξτε την πρώτη με «+ Νέα ενότητα».</div>`}`;
+    ${secs || `<div class="empty" style="margin-top:14px">Δεν έχετε ενότητες ακόμη. Φτιάξτε την πρώτη με «+ Ενότητα εκτός καταλόγου» ή από μια κάρτα του καταλόγου.</div>`}`;
   } else if (isMine) {
     const L = [];
     allC.forEach(x => { const st = stateOf(x.c); if (st === 'mine' || (st === 'soon' && mine.has(x.c.key))) (L[x.i] = L[x.i] || []).push({ ...x, st }); });
@@ -980,11 +980,12 @@ async function teacherHome(tok) {
   const panels = [unreadHTML, F.assignments ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
     ${pend.length ? `<ul class="list">${pend.slice(0, 12).map(p => `<li><a class="item" href="#/c/${p.assignments.class_id}/asg/${p.assignment_id}/grade/${p.id}"><span class="spacer"><b>${esc(p.profiles?.full_name || '')}</b><br><span class="muted small">${esc(p.assignments.title)} · ${fmtDay(p.submitted_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Όλα βαθμολογημένα.</p>`}
   </div>` : ''].filter(Boolean);
-  app.innerHTML = meLayout('dash', `<div class="row between"><h1 style="margin:0">Ο πίνακάς μου</h1><span class="row"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn accent" href="#/new-class">+ Νέα ενότητα</a></span></div>
-  ${tiles}
-  ${panels.length ? `<div class="${panels.length > 1 ? 'two' : ''}">${panels.join('')}</div>` : ''}
-  ${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}
+  const acts = `<div class="tacts"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn accent" href="#/new-class" title="Για κλειστά τμήματα ή υλικό που δεν ανήκει σε κάρτα του καταλόγου">+ Ενότητα εκτός καταλόγου</a></div>`;
+  app.innerHTML = meLayout('dash', `<div class="thero"><img src="img/hero_teacher.jpg" alt="Πίνακας καθηγητή"><a class="thgo" href="#/me" aria-label="Ο πίνακάς μου"></a></div>
+  <div class="tdash"><div class="tmain">${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}</div>
+    <aside class="tside" aria-label="Σύνοψη">${acts}${tiles}${panels.join('')}</aside></div>
   ${otherHTML}`);
+  const go1 = $('.thgo'); if (go1) go1.onclick = e => { e.preventDefault(); const c = $('#catalog'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   if (catHTML) bindCatalog();
   $$('.panel .ccard.tcl[data-href]').forEach(el => { if (!el.closest('#catalog')) el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); }; });
   $$('.panel button.newl').forEach(b => { if (!b.closest('#catalog')) b.onclick = () => newLesson(b.dataset.c); });
@@ -993,7 +994,7 @@ async function teacherHome(tok) {
 route(/^\/new-class$/, async () => {
   if (needLogin()) return;
   if (!isTeacher()) return go('#/');
-  app.innerHTML = `<div class="panel" style="max-width:640px"><h1>Νέα ενότητα</h1><form class="f" id="fm">
+  app.innerHTML = `<div class="panel" style="max-width:640px"><h1>Ενότητα εκτός καταλόγου</h1><form class="f" id="fm">
     <label>Τίτλος<input type="text" name="name" maxlength="120" placeholder="π.χ. Βασικές αρχές θερμοδυναμικής" required></label>
     <label>Περιγραφή (προαιρετικά)<textarea name="desc" style="min-height:70px"></textarea></label>
     <label class="chk"><input type="checkbox" name="open" checked> <span>Ανοιχτή σε όλους τους εγγεγραμμένους χρήστες (χωρίς τσεκάρισμα: πρόσβαση μόνο με κωδικό)</span></label>
