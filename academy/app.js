@@ -981,11 +981,10 @@ async function teacherHome(tok) {
     ${pend.length ? `<ul class="list">${pend.slice(0, 12).map(p => `<li><a class="item" href="#/c/${p.assignments.class_id}/asg/${p.assignment_id}/grade/${p.id}"><span class="spacer"><b>${esc(p.profiles?.full_name || '')}</b><br><span class="muted small">${esc(p.assignments.title)} · ${fmtDay(p.submitted_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Όλα βαθμολογημένα.</p>`}
   </div>` : ''].filter(Boolean);
   const acts = `<div class="tacts"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn accent" href="#/new-class" title="Για κλειστά τμήματα ή υλικό που δεν ανήκει σε κάρτα του καταλόγου">+ Ενότητα εκτός καταλόγου</a></div>`;
-  app.innerHTML = meLayout('dash', `<div class="thero"><img src="img/hero_teacher.jpg" alt="Πίνακας καθηγητή"><a class="thgo" href="#/me" aria-label="Ο πίνακάς μου"></a></div>${acts}
+  app.innerHTML = meLayout('dash', `<div class="thero" style="background-image:url(img/hero_teacher_bg.jpg)"><div class="thtxt"><div class="thbrand"><span>❄</span> Cooling Systems Lab Academy</div><h1 class="thbadge">Πίνακας καθηγητή</h1><p class="thhi">Καλώς ήρθες ξανά, <b>${esc((me.full_name || '').split(' ')[0])}</b>!</p><p class="thlead">Όλα τα εργαλεία που χρειάζεσαι για να οργανώσεις και να υποστηρίξεις τα μαθήματά σου.</p><ul class="thul"><li>Διαχείριση περιεχομένου και εργασιών</li><li>Παρακολούθηση προόδου και αξιολογήσεων</li><li>Επικοινωνία με μαθητές</li><li>Αναλυτικά στατιστικά και αναφορές</li></ul></div></div>${acts}
   <div class="tmain">${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}</div>
   <aside class="tside" aria-label="Σύνοψη">${tiles}${panels.join('')}</aside>
   ${otherHTML ? `<div class="tother">${otherHTML}</div>` : ''}`, 'tg');
-  const go1 = $('.thgo'); if (go1) go1.onclick = e => { e.preventDefault(); const c = $('#catalog'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   if (catHTML) bindCatalog();
   $$('.panel .ccard.tcl[data-href]').forEach(el => { if (!el.closest('#catalog')) el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); }; });
   $$('.panel button.newl').forEach(b => { if (!b.closest('#catalog')) b.onclick = () => newLesson(b.dataset.c); });
