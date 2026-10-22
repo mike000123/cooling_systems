@@ -548,9 +548,29 @@ async function unreadPanel() {
 }
 
 // θέση μιας ενότητας στον κατάλογο (τομέας, επίπεδο, όνομα, περιγραφή)
-function catOf(classId) {
-  for (const t of TRACKS) for (const [i, l] of t.levels.entries()) for (const c of l.courses) if (c.classId === classId) return { c, t, i, l };
+function catOf(classId, key) {
+  for (const t of TRACKS) for (const [i, l] of t.levels.entries()) for (const c of l.courses)
+    if ((classId && (c.classId === classId || c.linkedId === classId)) || (key && c.key === key)) return { c, t, i, l };
   return null;
+}
+// Ποια μαθήματα του καταλόγου έχουν ενότητα: RPC catalog_status (update_09). Ένα μάθημα εμφανίζεται «Διαθέσιμο»
+// μόλις η ενότητά του (ανοιχτή) έχει τουλάχιστον ένα δημοσιευμένο μάθημα. Χωρίς το RPC → classId του catalog.js.
+let catStat = null, catStatAt = 0;
+async function loadCatStatus(force) {
+  if (!TRACKS.length) return;
+  if (!force && catStat !== null && Date.now() - catStatAt < 60000) return;
+  let rows = null;
+  try { const r = await sb.rpc('catalog_status'); if (!r.error) rows = r.data || []; } catch (e) { }
+  catStat = rows || false; catStatAt = Date.now();
+  const st = {}; (rows || []).forEach(r => st[r.course_key] = r);
+  for (const t of TRACKS) for (const l of t.levels) for (const c of l.courses) {
+    if (c.staticId === undefined) c.staticId = c.classId || '';
+    if (!rows) { c.classId = c.staticId; c.linkedId = c.staticId; c.nPub = null; continue; }
+    const r = st[c.key];
+    c.linkedId = r ? r.class_id : '';
+    c.nPub = r ? r.lessons : 0;
+    c.classId = r && r.lessons > 0 ? r.class_id : '';
+  }
 }
 function classCards(list, extra) {
   if (!list.length) return '';
@@ -581,6 +601,7 @@ let catOpts = {};
 async function catalogPanel(opts) {
   if (opts) catOpts = opts;
   if (!TRACKS.length) return '';
+  await loadCatStatus();
   const T = curT(), LVN = (CAT && CAT.levelNames) || [];
   const lvName = (l, i) => (l && l.name) || LVN[i] || 'Επίπεδο ' + (i + 1);
   const names = await loadSimNames(), mine = new Set(catOpts.mine || []), counts = catOpts.counts || null;
@@ -594,6 +615,7 @@ async function catalogPanel(opts) {
   // στην αρχική ανοίγει πρώτα η «δική μου» καρτέλα, εκτός αν ο χρήστης διάλεξε τομέα σε αυτή την επίσκεψη
   const isMine = catOpts.view === 'mine';   // «Ο πίνακάς μου»: μόνο τα δικά μου, ανά επίπεδο
   const card = (c, tag) => {
+    if (teach && !tag) return teachCard(c);
     const open = !!c.classId, st = stateOf(c), sl = (c.sims || []).filter(k => names[k]);
     const sims = sl.slice(0, 2).map(k => `<a class="simlink" href="${esc(simHref(k))}" target="_blank" rel="noopener" title="${esc(names[k])}">◎ ${esc(names[k])}</a>`).join('')
       + (sl.length > 2 ? `<span class="simmore" title="${esc(sl.slice(2).map(k => names[k]).join(' · '))}">+${sl.length - 2}</span>` : '');
@@ -612,6 +634,24 @@ async function catalogPanel(opts) {
       <h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.desc || '')}</p>
       ${sims && !tag ? `<div class="simlinks"><span class="small muted">${open ? 'Προσομοιώσεις:' : 'Δοκίμασε ήδη τώρα:'}</span>${sims}</div>` : ''}
       ${bar}<div class="ccact">${action}</div></div>`;
+  };
+  // εκπαιδευτής: κάθε κάρτα του καταλόγου είναι επεξεργάσιμη (ενότητα του μαθήματος → μαθήματα & υλικό)
+  const teachCard = c => {
+    const k = teach.byKey[c.key] || teach.classes.find(x => x.id === c.linkedId || x.id === c.staticId);
+    const nI = counts ? counts[c.key] || 0 : 0, intr = `<span class="pill info">🔔 ${nI} ενδιαφέρονται</span>`;
+    if (k) {
+      const nP = teach.pub[k.id] || 0, nA = teach.all[k.id] || 0;
+      const pills = `${nP ? '<span class="pill ok">Διαθέσιμο στους χρήστες</span>' : '<span class="pill warn">Σε προετοιμασία</span>'}${k.is_open ? '' : `<span class="pill">Κλειστή · ${teach.cnt[k.id] || 0} μέλη</span>`}${teach.pc[k.id] ? `<span class="pill warn">${teach.pc[k.id]} προς βαθμολόγηση</span>` : ''}`;
+      return `<div class="ccard open tcl${nP ? '' : ' prep'}" data-href="#/c/${esc(k.id)}"><div class="row" style="gap:6px">${pills}</div>
+        <h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.desc || '')}</p>
+        <p class="small muted tstat">📚 ${nA ? `${nP} δημοσιευμένα · ${nA - nP} πρόχειρα μαθήματα` : 'Δεν έχει μαθήματα ακόμη'} · ${intr}</p>
+        <div class="ccact"><a class="btn accent small" href="#/c/${esc(k.id)}">Μαθήματα →</a><button class="btn small newl" data-c="${esc(k.id)}">+ Νέο μάθημα</button></div></div>`;
+    }
+    if (c.linkedId) return `<div class="ccard open" data-href="#/c/${esc(c.linkedId)}"><span class="pill ok">Διαθέσιμο</span><h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.desc || '')}</p>
+        <p class="small muted tstat">Ενότητα άλλου εκπαιδευτή · ${intr}</p><div class="ccact"><a class="btn small" href="#/c/${esc(c.linkedId)}">Άνοιγμα →</a></div></div>`;
+    return `<div class="ccard"><span class="pill">Χωρίς υλικό ακόμη</span><h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.desc || '')}</p>
+        <p class="small muted tstat">${intr}</p>
+        <div class="ccact"><button class="btn accent small mkcls" data-k="${esc(c.key)}">＋ Ξεκίνα την ενότητα</button></div></div>`;
   };
   const section = (num, title, sub, cards) => `<section class="lvl"><div class="lvlhead"><span class="lvlnum">${num}</span><div class="spacer"><h3>${esc(title)}</h3>${sub ? `<p class="muted small">${esc(sub)}</p>` : ''}</div>
       <span class="lvlnav"><button class="btn small" data-d="-1" aria-label="Προηγούμενα">‹</button><button class="btn small" data-d="1" aria-label="Επόμενα">›</button></span></div>
@@ -660,10 +700,12 @@ async function catalogPanel(opts) {
   } else {
     const all = T.levels.flatMap(l => l.courses), nOpen = all.filter(c => c.classId).length;
     const nMine = acc ? all.filter(c => stateOf(c) === 'mine').length : 0, nLock = acc ? all.filter(c => stateOf(c) === 'locked').length : 0;
-    const summary = acc ? [nMine ? `${plural(nMine, 'ανοιχτό', 'ανοιχτά')} για σένα` : '', nLock ? `${nLock} με κωδικό` : '', `${all.length - nOpen} έρχονται σύντομα`].filter(Boolean).join(' · ')
+    const nLinked = teach ? all.filter(c => teach.byKey[c.key] || c.linkedId).length : 0;
+    const summary = teach ? `${nLinked} με ενότητα · ${all.length - nLinked} χωρίς υλικό ακόμη` : acc ? [nMine ? `${plural(nMine, 'ανοιχτό', 'ανοιχτά')} για σένα` : '', nLock ? `${nLock} με κωδικό` : '', `${all.length - nOpen} έρχονται σύντομα`].filter(Boolean).join(' · ')
       : `${nOpen} διαθέσιμα · ${all.length - nOpen} έρχονται σύντομα`;
-    const legend = acc ? `<div class="catlegend small">${lg('ok', '✓ Ανοιχτό για σένα', 'μπορείς να το παρακολουθήσεις τώρα')}${nLock ? lg('info', '🔒 Με κωδικό τμήματος', 'θέλει κωδικό από τον εκπαιδευτή') : ''}${lg('warn', 'Έρχεται σύντομα', 'πάτα 🔔 για να ενημερωθείς')}</div>` : '';
-    body = `${acc ? '<p class="catkick">Κατάλογος μαθημάτων</p>' : ''}
+    const legend = teach ? `<div class="catlegend small">${lg('ok', 'Διαθέσιμο στους χρήστες', 'έχει δημοσιευμένα μαθήματα')}${lg('warn', 'Σε προετοιμασία', 'η ενότητα υπάρχει, δεν έχει ακόμη δημοσιευμένο μάθημα')}${lg('', 'Χωρίς υλικό ακόμη', '«＋ Ξεκίνα την ενότητα» για να την ετοιμάσεις')}</div>`
+      : acc ? `<div class="catlegend small">${lg('ok', '✓ Ανοιχτό για σένα', 'μπορείς να το παρακολουθήσεις τώρα')}${nLock ? lg('info', '🔒 Με κωδικό τμήματος', 'θέλει κωδικό από τον εκπαιδευτή') : ''}${lg('warn', 'Έρχεται σύντομα', 'πάτα 🔔 για να ενημερωθείς')}</div>` : '';
+    body = `${acc || teach ? `<p class="catkick">${teach ? 'Όλος ο κατάλογος — πατήστε ένα μάθημα για να το εμπλουτίσετε' : 'Κατάλογος μαθημάτων'}</p>` : ''}
     <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="pill">${summary}</span></div>
     <p class="muted" style="margin:6px 0 0">${all.length} μαθήματα σε ${T.levels.length} επίπεδα, από τα βασικά ως το επαγγελματικό.</p>${legend}
     ${T.levels.map((l, i) => section(i + 1, lvName(l, i), l.tag || '', l.courses.map(c => card(c)).join(''))).join('')}`;
@@ -673,6 +715,19 @@ async function catalogPanel(opts) {
       return `<button role="tab" class="ttab${on ? ' on' : ''}" aria-selected="${on}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}</nav>` : '';
   if (isMine) return `<div class="panel" id="catalog">${body}</div>`;
   return `<div class="panel catalog${tabs ? ' hastabs' : ''}" id="catalog">${tabs}<div class="tbody">${body}</div></div>`;
+}
+// «＋ Ξεκίνα την ενότητα»: φτιάχνει την ενότητα ενός μαθήματος του καταλόγου (course_key) και ανοίγει τη σελίδα της
+async function newCourseClass(key, btn) {
+  const m = catOf(null, key); if (!m) return;
+  if (!confirm(`Να δημιουργηθεί η ενότητα «${m.c.name}»;\n\nΘα είναι ανοιχτή σε όλους, αλλά οι χρήστες θα τη βλέπουν μόνο όταν δημοσιεύσετε το πρώτο μάθημα.`)) return;
+  if (btn) btn.disabled = true;
+  try {
+    const c = await q(sb.from('classes').insert({ name: m.c.name, description: m.c.desc || '', is_open: true, owner: me.id, course_key: key }).select().single());
+    await loadCatStatus(true); toast('Η ενότητα δημιουργήθηκε. Προσθέστε το πρώτο μάθημα.'); go('#/c/' + c.id);
+  } catch (er) {
+    const t = String(er && (er.message || er)).toLowerCase();
+    toast(t.includes('course_key') && !t.includes('duplicate') ? 'Τρέξτε πρώτα το update_09_catalog_link.sql στο Supabase.' : t.includes('duplicate') ? 'Υπάρχει ήδη ενότητα για αυτό το μάθημα.' : errText(er), true);
+  } finally { if (btn) btn.disabled = false; }
 }
 async function newLesson(cid) {
   try {
@@ -691,6 +746,7 @@ function meLayout(on, inner) {
 const pvBanner = () => homePreview() ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε όπως ένας χρήστης (μόνο ανοιχτές ενότητες, χωρίς πρόχειρα). Η πρόοδος είναι η δική σας.</span><span class="row"><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : '';
 // δεδομένα σπουδαστή: ενότητες, πρόοδος, δηλώσεις, «συνέχισε»
 async function studentBase() {
+  await loadCatStatus();
   const [lessons, myProg, classes, mine] = await Promise.all([
     q(sb.from('lessons').select('id,class_id,title,position').eq('published', true)),
     q(sb.from('lesson_progress').select('lesson_id,class_id,completed_at').eq('user_id', me.id)),
@@ -728,6 +784,7 @@ function bindCatalog() {
   });
   $$('#catalog .ccard[data-href]').forEach(el => el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); });
   $$('#catalog button.newl').forEach(b => b.onclick = () => newLesson(b.dataset.c));
+  $$('#catalog button.mkcls').forEach(b => b.onclick = () => newCourseClass(b.dataset.k, b));
   $$('#catalog .joinlink').forEach(b => b.onclick = () => {
     const d = $('#joinbox'); if (!d) { try { sessionStorage.setItem('csl-openjoin', '1'); } catch (e) { } return go('#/me'); } d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => d.querySelector('input')?.focus(), 300);
   });
@@ -828,9 +885,18 @@ async function teacherHome(tok) {
   const unreadHTML = await unreadPanel();
   const cnt = {}; enr.forEach(e => cnt[e.class_id] = (cnt[e.class_id] || 0) + 1);
   const pc = {}; pend.forEach(p => pc[p.assignments.class_id] = (pc[p.assignments.class_id] || 0) + 1);
-  const [counts, ov] = await Promise.all([interestCounts(), sb.rpc('admin_overview').then(r => r.data || null, () => null)]);
-  const catHTML = await catalogPanel({ view: 'mine', counts, teach: { classes, cnt, pc } });
+  const [counts, ov, ls] = await Promise.all([interestCounts(), sb.rpc('admin_overview').then(r => r.data || null, () => null),
+    classes.length ? q(sb.from('lessons').select('class_id,published').in('class_id', classes.map(c => c.id))) : none()]);
+  const pub = {}, all = {}; ls.forEach(l => { all[l.class_id] = (all[l.class_id] || 0) + 1; if (l.published) pub[l.class_id] = (pub[l.class_id] || 0) + 1; });
+  const byKey = {}; classes.forEach(c => { if (c.course_key) byKey[c.course_key] = c; });
+  const catHTML = await catalogPanel({ counts, teach: { classes, cnt, pc, pub, all, byKey } });
   if (stale(tok)) return;
+  // ενότητες εκτός καταλόγου
+  const other = classes.filter(c => !c.course_key && !catOf(c.id));
+  const otherHTML = other.length ? `<div class="panel"><h2 style="margin-top:0">Άλλες ενότητες</h2><p class="muted small" style="margin:0 0 6px">Ενότητες που δεν αντιστοιχούν σε μάθημα του καταλόγου.</p>
+    <div class="rail" style="flex-wrap:wrap;overflow:visible">${other.map(k => `<div class="ccard open tcl" data-href="#/c/${esc(k.id)}"><div class="row" style="gap:6px">${k.is_open ? '<span class="pill ok">Ανοιχτή σε όλους</span>' : `<span class="pill">Κλειστή · ${cnt[k.id] || 0} μέλη</span>`}${k.archived ? '<span class="pill">Αρχειοθετημένο</span>' : ''}</div>
+      <h3>${esc(k.name)}</h3><p class="muted small cdesc">${esc(k.description || '')}</p><p class="small muted tstat">📚 ${pub[k.id] || 0} δημοσιευμένα · ${(all[k.id] || 0) - (pub[k.id] || 0)} πρόχειρα</p>
+      <div class="ccact"><a class="btn accent small" href="#/c/${esc(k.id)}">Μαθήματα →</a><button class="btn small newl" data-c="${esc(k.id)}">+ Νέο μάθημα</button></div></div>`).join('')}</div></div>` : '';
   const nDecl = Object.values(counts).reduce((a, b) => a + b, 0), nDC = Object.keys(counts).length, k = ov && ov.kpi;
   const tiles = `<div class="tiles sm">${k ? tile(k.users, 'χρήστες', `+${k.new7} σε 7 μέρες`) + tile(k.active7, 'ενεργοί (7 ημέρες)') : ''}${tile(nDecl, 'δηλώσεις 🔔', nDC ? `σε ${nDC} μαθήματα` : '')}${F.assignments ? tile(pend.length, 'προς βαθμολόγηση') : (k ? tile(k.completions, 'ολοκληρώσεις μαθημάτων') : '')}</div>`;
   const panels = [unreadHTML, F.assignments ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
@@ -839,8 +905,11 @@ async function teacherHome(tok) {
   app.innerHTML = meLayout('dash', `<div class="row between"><h1 style="margin:0">Ο πίνακάς μου</h1><span class="row"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn accent" href="#/new-class">+ Νέα ενότητα</a></span></div>
   ${tiles}
   ${panels.length ? `<div class="${panels.length > 1 ? 'two' : ''}">${panels.join('')}</div>` : ''}
-  ${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}`);
+  ${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}
+  ${otherHTML}`);
   if (catHTML) bindCatalog();
+  $$('.panel .ccard.tcl[data-href]').forEach(el => { if (!el.closest('#catalog')) el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); }; });
+  $$('.panel button.newl').forEach(b => { if (!b.closest('#catalog')) b.onclick = () => newLesson(b.dataset.c); });
 }
 
 route(/^\/new-class$/, async () => {

@@ -356,3 +356,6 @@ body.viewing{overflow:hidden}
 .ccard[data-href]{cursor:pointer}
 .ccard[data-href]:hover{box-shadow:0 0 0 3px rgba(226,103,43,.18)}
 @media (max-width:720px){.mewrap{grid-template-columns:minmax(0,1fr)}.side{position:static;display:flex;flex-wrap:wrap;gap:6px;padding:8px}.side .who{width:100%;margin:0 0 4px}.side a{flex:1 1 40%;justify-content:center}}
+/* εκπαιδευτής: επεξεργάσιμος κατάλογος (2026-10-22) */
+.ccard.tcl.prep{border-color:#E9B949;box-shadow:0 0 0 2px rgba(233,185,73,.15)}
+.ccard .tstat{margin:2px 0 0;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
