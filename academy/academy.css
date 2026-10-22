@@ -360,16 +360,24 @@ body.viewing{overflow:hidden}
 .ccard.tcl.prep{border-color:#E9B949;box-shadow:0 0 0 2px rgba(233,185,73,.15)}
 .ccard .tstat{margin:2px 0 0;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
 
-/* πίνακας εκπαιδευτή: header εικόνα + κατάλογος με στατιστικά στο δεξί περιθώριο (2026-10-23) */
-.thero{position:relative;margin:0 0 16px;border-radius:18px;overflow:hidden;border:1px solid var(--line);box-shadow:0 10px 30px rgba(16,38,63,.06)}
+/* πίνακας εκπαιδευτή (2026-10-23): πλήρες πλάτος· αριστερά μενού, κάτω από την εικόνα ο κατάλογος που πηγαίνει αριστερά κάτω από το μενού, δεξιά στατιστικά */
+.wrap:has(.mewrap.tg){max-width:1800px;padding-inline:clamp(16px,2.5vw,40px)}
+.mewrap.tg{grid-template-columns:220px minmax(0,1fr) 230px;gap:16px 20px}
+.tg .mebody{display:contents}
+.tg .side{position:static;grid-area:1/1;align-self:start}
+.thero{position:relative;border-radius:18px;overflow:hidden;border:1px solid var(--line);box-shadow:0 10px 30px rgba(16,38,63,.06)}
+.tg .thero{grid-area:1/2;align-self:start}
 .thero img{display:block;width:100%;height:auto}
 .thero .thgo{position:absolute;left:78%;top:76%;width:20.5%;height:16%;border-radius:12px}
 .thero .thgo:focus-visible{outline:3px solid var(--teal)}
-.tdash{display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:16px;align-items:start}
-.tdash .tmain>.panel{margin-top:0}
-.tside{display:grid;gap:12px;position:sticky;top:16px}
-.tside .tacts{display:grid;gap:8px}.tside .tacts .btn{width:100%;justify-content:center;text-align:center}
+.tg .tacts{grid-area:1/3;align-self:start;display:grid;gap:8px}
+.tacts .btn{width:100%;justify-content:center;text-align:center}
+.tg .tmain{grid-area:2/1/3/3;min-width:0}
+.tg .tmain>.panel{margin-top:0}
+.tg .tside{grid-area:2/3;align-self:start;display:grid;gap:12px}
 .tside .tiles,.tside .tiles.sm{grid-template-columns:1fr;margin:0;gap:10px}
 .tside .tile{padding:12px 14px}.tside .tile b{font-size:24px}
 .tside .panel{margin:0;padding:12px}
-@media (max-width:1100px){.tdash{grid-template-columns:minmax(0,1fr)}.tside{position:static;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}.tside .tacts{grid-column:1/-1;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}}
+.tg .tother{grid-area:3/1/4/4;min-width:0}
+@media (max-width:1100px){.mewrap.tg{grid-template-columns:minmax(0,1fr)}.tg .side,.tg .thero,.tg .tacts,.tg .tmain,.tg .tside,.tg .tother{grid-area:auto}
+  .tg .side{position:static}.tg .tacts{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.tg .tside{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}}

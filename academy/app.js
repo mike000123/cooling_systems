@@ -764,10 +764,10 @@ async function newLesson(cid) {
   } catch (er) { toast(errText(er), true); }
 }
 // προσωπικός χώρος: sidebar (Ο πίνακάς μου / Στατιστικά / Ρυθμίσεις)
-function meLayout(on, inner) {
+function meLayout(on, inner, cls) {
   const T = isTeacher() && !homePreview(), first = (me.full_name || '?').split(' ')[0];
   const items = [['dash', '#/me', '🏠', 'Ο πίνακάς μου']].concat(T ? [['stats', '#/me/stats', '📊', 'Στατιστικά']] : [], [['set', '#/me/settings', '⚙️', 'Ρυθμίσεις']]);
-  return `<div class="mewrap"><aside class="side" aria-label="Ο λογαριασμός μου"><div class="who"><span class="av">${esc(first[0].toUpperCase())}</span><div><b>${esc(first)}</b><small>${T ? 'Εκπαιδευτής' : 'Σπουδαστής'}</small></div></div>
+  return `<div class="mewrap${cls ? ' ' + cls : ''}"><aside class="side" aria-label="Ο λογαριασμός μου"><div class="who"><span class="av">${esc(first[0].toUpperCase())}</span><div><b>${esc(first)}</b><small>${T ? 'Εκπαιδευτής' : 'Σπουδαστής'}</small></div></div>
     ${items.map(([k, h, i, t]) => `<a class="${k === on ? 'on' : ''}" href="${h}"${k === on ? ' aria-current="page"' : ''}>${i} ${t}</a>`).join('')}</aside><div class="mebody">${inner}</div></div>`;
 }
 const pvBanner = () => homePreview() ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε όπως ένας χρήστης (μόνο ανοιχτές ενότητες, χωρίς πρόχειρα). Η πρόοδος είναι η δική σας.</span><span class="row"><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : '';
@@ -981,10 +981,10 @@ async function teacherHome(tok) {
     ${pend.length ? `<ul class="list">${pend.slice(0, 12).map(p => `<li><a class="item" href="#/c/${p.assignments.class_id}/asg/${p.assignment_id}/grade/${p.id}"><span class="spacer"><b>${esc(p.profiles?.full_name || '')}</b><br><span class="muted small">${esc(p.assignments.title)} · ${fmtDay(p.submitted_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Όλα βαθμολογημένα.</p>`}
   </div>` : ''].filter(Boolean);
   const acts = `<div class="tacts"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn accent" href="#/new-class" title="Για κλειστά τμήματα ή υλικό που δεν ανήκει σε κάρτα του καταλόγου">+ Ενότητα εκτός καταλόγου</a></div>`;
-  app.innerHTML = meLayout('dash', `<div class="thero"><img src="img/hero_teacher.jpg" alt="Πίνακας καθηγητή"><a class="thgo" href="#/me" aria-label="Ο πίνακάς μου"></a></div>
-  <div class="tdash"><div class="tmain">${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}</div>
-    <aside class="tside" aria-label="Σύνοψη">${acts}${tiles}${panels.join('')}</aside></div>
-  ${otherHTML}`);
+  app.innerHTML = meLayout('dash', `<div class="thero"><img src="img/hero_teacher.jpg" alt="Πίνακας καθηγητή"><a class="thgo" href="#/me" aria-label="Ο πίνακάς μου"></a></div>${acts}
+  <div class="tmain">${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}</div>
+  <aside class="tside" aria-label="Σύνοψη">${tiles}${panels.join('')}</aside>
+  ${otherHTML ? `<div class="tother">${otherHTML}</div>` : ''}`, 'tg');
   const go1 = $('.thgo'); if (go1) go1.onclick = e => { e.preventDefault(); const c = $('#catalog'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   if (catHTML) bindCatalog();
   $$('.panel .ccard.tcl[data-href]').forEach(el => { if (!el.closest('#catalog')) el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); }; });
