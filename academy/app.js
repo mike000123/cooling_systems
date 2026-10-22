@@ -560,11 +560,20 @@ let customAt = 0;
 async function loadCustom(force) {
   if (!TRACKS.length) return false;
   if (!force && customAt && Date.now() - customAt < 60000) return false;
-  let rows = [];
+  let rows = [], ov = {};
   try { const r = await sb.from('catalog_courses').select('*').order('created_at'); if (!r.error) rows = r.data || []; } catch (e) { }
+  try { const r = await sb.from('catalog_overrides').select('*'); if (!r.error) (r.data || []).forEach(x => ov[x.key] = x); } catch (e) { }
+  let trs = [];   // τομείς (σχολές) που φτιάχνει ο εκπαιδευτής από την Academy
+  try { const r = await sb.from('catalog_tracks').select('*').order('created_at'); if (!r.error) trs = r.data || []; } catch (e) { }
+  for (let i = TRACKS.length - 1; i >= 0; i--) if (TRACKS[i].custom) TRACKS.splice(i, 1);
+  trs.forEach(x => TRACKS.push({ key: x.key, name: x.name, short: x.short_name || x.name, headline: x.headline || '', custom: true, levels: [0, 1, 2, 3].map(() => ({ tag: '', courses: [] })) }));
   customAt = Date.now();
   for (const t of TRACKS) t.levels.forEach((l, i) => {
     if (!l._base) l._base = l.courses.slice();
+    l._base.forEach(c => {   // αλλαγές ονόματος/περιγραφής από την Academy υπερισχύουν του catalog.js
+      if (!c._o) c._o = { name: c.name, desc: c.desc || '' };
+      const o = ov[c.key]; c.name = o && o.name ? o.name : c._o.name; c.desc = o && o.description != null ? o.description : c._o.desc;
+    });
     l.courses = l._base.concat(rows.filter(x => x.track_key === t.key && x.level_index === i)
       .map(x => ({ key: x.key, name: x.name, desc: x.description || '', classId: '', sims: [], custom: true, cid: x.id })));
   });
@@ -669,7 +678,7 @@ async function catalogPanel(opts) {
         <p class="small muted tstat">${intr}</p>
         <div class="ccact"><button class="btn accent small mkcls" data-k="${esc(c.key)}">＋ Ξεκίνα την ενότητα</button></div></div>`;
   };
-  const teachCard = c => { const h = teachCard0(c); return !c.custom ? h : h.replace('<div class="ccact">', `<div class="ccact"><button class="btn small editcard" data-k="${esc(c.key)}" title="Επεξεργασία κάρτας">✎</button><button class="btn small delcard" data-k="${esc(c.key)}" title="Διαγραφή κάρτας">🗑</button>`); };
+  const teachCard = c => { const h = teachCard0(c); return h.replace('<div class="ccact">', `<div class="ccact"><button class="btn small editcard" data-k="${esc(c.key)}" title="Επεξεργασία ονόματος και περιγραφής">✎</button>${c.custom ? `<button class="btn small delcard" data-k="${esc(c.key)}" title="Διαγραφή κάρτας">🗑</button>` : ''}`); };
   const section = (num, title, sub, cards, act) => `<section class="lvl"><div class="lvlhead"><span class="lvlnum">${num}</span><div class="spacer"><h3>${esc(title)}</h3>${sub ? `<p class="muted small">${esc(sub)}</p>` : ''}</div>
       ${act || ''}<span class="lvlnav"><button class="btn small" data-d="-1" aria-label="Προηγούμενα">‹</button><button class="btn small" data-d="1" aria-label="Επόμενα">›</button></span></div>
       <div class="rail">${cards}</div></section>`;
@@ -723,13 +732,14 @@ async function catalogPanel(opts) {
     const legend = teach ? `<div class="catlegend small">${lg('ok', 'Διαθέσιμο στους χρήστες', 'έχει δημοσιευμένα μαθήματα')}${lg('warn', 'Σε προετοιμασία', 'η ενότητα υπάρχει, δεν έχει ακόμη δημοσιευμένο μάθημα')}${lg('', 'Χωρίς υλικό ακόμη', '«＋ Ξεκίνα την ενότητα» για να την ετοιμάσεις')}</div>`
       : acc ? `<div class="catlegend small">${lg('ok', '✓ Ανοιχτό για σένα', 'μπορείς να το παρακολουθήσεις τώρα')}${nLock ? lg('info', '🔒 Με κωδικό τμήματος', 'θέλει κωδικό από τον εκπαιδευτή') : ''}${lg('warn', 'Έρχεται σύντομα', 'πάτα 🔔 για να ενημερωθείς')}</div>` : '';
     body = `${acc || teach ? `<p class="catkick">${teach ? 'Όλος ο κατάλογος — πατήστε ένα μάθημα για να το εμπλουτίσετε' : 'Κατάλογος μαθημάτων'}</p>` : ''}
-    <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="pill">${summary}</span></div>
+    <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="row" style="gap:6px">${teach && T.custom ? `<button class="btn small edittrack" data-k="${esc(T.key)}">✎ Τομέας</button><button class="btn small deltrack" data-k="${esc(T.key)}" title="Διαγραφή τομέα">🗑</button>` : ''}<span class="pill">${summary}</span></span></div>
     <p class="muted" style="margin:6px 0 0">${all.length} μαθήματα σε ${T.levels.length} επίπεδα, από τα βασικά ως το επαγγελματικό.</p>${legend}
     ${T.levels.map((l, i) => section(i + 1, lvName(l, i), l.tag || '', l.courses.map(c => card(c)).join(''), teach ? `<button class="btn small addcard" data-t="${esc(T.key)}" data-i="${i}">＋ Νέα κάρτα</button>` : '')).join('')}`;
   }
-  const tabs = !isMine && TRACKS.length > 1 ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${TRACKS.map(t => {
+  const vis = teach ? TRACKS : TRACKS.filter(t => !t.custom || t.levels.some(l => l.courses.length));   // οι κενοί νέοι τομείς φαίνονται μόνο στον εκπαιδευτή
+  const tabs = !isMine && (vis.length > 1 || teach) ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${vis.map(t => {
       const n = t.levels.reduce((a, l) => a + l.courses.length, 0), on = !isMine && t === T;
-      return `<button role="tab" class="ttab${on ? ' on' : ''}" aria-selected="${on}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}</nav>` : '';
+      return `<button role="tab" class="ttab${on ? ' on' : ''}" aria-selected="${on}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}${teach ? '<button class="ttab addtrack"><b>＋ Νέος τομέας</b><span>σχολή / κατεύθυνση</span></button>' : ''}</nav>` : '';
   if (isMine) return `<div class="panel" id="catalog">${body}</div>`;
   return `<div class="panel catalog${tabs ? ' hastabs' : ''}" id="catalog">${tabs}<div class="tbody">${body}</div></div>`;
 }
@@ -790,15 +800,39 @@ async function studentBase() {
 async function refreshCatalog() {
   await loadCatStatus(true); const html = await catalogPanel(); const old = $('#catalog'); if (old) { old.outerHTML = html; bindCatalog(); }
 }
-const cardErr = er => /catalog_courses/i.test(String(er && (er.message || er))) ? 'Τρέξτε πρώτα το update_12_catalog_courses.sql στο Supabase.' : errText(er);
+const cardErr = er => /catalog_(courses|overrides|tracks)/i.test(String(er && (er.message || er))) ? 'Τρέξτε πρώτα το update_12_catalog_courses.sql και update_13_catalog_overrides.sql και update_14_catalog_tracks.sql στο Supabase.' : errText(er);
 async function editCard(key, trackKey, lvl) {
   const m = key ? catOf(null, key) : null, row = m && m.c;
   const name = prompt(row ? 'Όνομα μαθήματος:' : 'Όνομα του νέου μαθήματος (θα μπει στο επίπεδο που πατήσατε):', row ? row.name : ''); if (name === null || !name.trim()) return;
   const desc = prompt('Σύντομη περιγραφή (προαιρετική):', row ? row.desc : ''); if (desc === null) return;
   try {
-    if (row) await q(sb.from('catalog_courses').update({ name: name.trim(), description: desc.trim() }).eq('id', row.cid));
+    if (row && !row.custom) {   // κάρτα του catalog.js: αποθηκεύουμε αλλαγή στη βάση (ή την αφαιρούμε αν επανήλθε η αρχική)
+      if (name.trim() === row._o.name && desc.trim() === row._o.desc) await q(sb.from('catalog_overrides').delete().eq('key', row.key));
+      else await q(sb.from('catalog_overrides').upsert({ key: row.key, name: name.trim(), description: desc.trim() }));
+    }
+    else if (row) await q(sb.from('catalog_courses').update({ name: name.trim(), description: desc.trim() }).eq('id', row.cid));
     else await q(sb.from('catalog_courses').insert({ key: 'c-' + Date.now().toString(36), track_key: trackKey, level_index: lvl, name: name.trim(), description: desc.trim() }));
     await refreshCatalog(); toast(row ? 'Η κάρτα ενημερώθηκε.' : 'Η κάρτα προστέθηκε. Πατήστε «＋ Ξεκίνα την ενότητα» για να την ετοιμάσετε.');
+  } catch (er) { toast(cardErr(er), true); }
+}
+async function editTrack(key) {
+  const t = key ? TRACKS.find(x => x.key === key) : null;
+  const name = prompt(t ? 'Όνομα τομέα:' : 'Όνομα του νέου τομέα (π.χ. Μηχανικοί οχημάτων):', t ? t.name : ''); if (name === null || !name.trim()) return;
+  const short = prompt('Σύντομο όνομα για την καρτέλα στα αριστερά (π.χ. Οχήματα):', t ? t.short : name.trim().slice(0, 24)); if (short === null) return;
+  try {
+    if (t) await q(sb.from('catalog_tracks').update({ name: name.trim(), short_name: short.trim() || name.trim() }).eq('key', t.key));
+    else { const k = 't-' + Date.now().toString(36); await q(sb.from('catalog_tracks').insert({ key: k, name: name.trim(), short_name: short.trim() || name.trim(), headline: 'Μάθε ' + name.trim().toLowerCase() })); curTrack = k; try { localStorage.setItem('csl-track', k); } catch (e) { } }
+    await refreshCatalog(); toast(t ? 'Ο τομέας ενημερώθηκε.' : 'Ο τομέας προστέθηκε. Πατήστε «＋ Νέα κάρτα» σε κάθε επίπεδο.');
+  } catch (er) { toast(cardErr(er), true); }
+}
+async function delTrack(key) {
+  const t = TRACKS.find(x => x.key === key); if (!t || !t.custom) return;
+  const n = t.levels.reduce((a, l) => a + l.courses.length, 0);
+  if (!confirm(`Να διαγραφεί ο τομέας «${t.name}»` + (n ? ` και οι ${n} κάρτες του;\n\nΟι ενότητες και τα μαθήματά τους ΔΕΝ διαγράφονται· θα εμφανίζονται στις «Άλλες ενότητες».` : ';'))) return;
+  try {
+    await q(sb.from('catalog_courses').delete().eq('track_key', key)); await q(sb.from('catalog_tracks').delete().eq('key', key));
+    if (curTrack === key) { curTrack = ''; try { localStorage.removeItem('csl-track'); } catch (e) { } }
+    await refreshCatalog(); toast('Ο τομέας διαγράφηκε.');
   } catch (er) { toast(cardErr(er), true); }
 }
 async function delCard(key) {
@@ -808,7 +842,7 @@ async function delCard(key) {
   catch (er) { toast(cardErr(er), true); }
 }
 function bindCatalog() {
-  $$('#catalog .ttab').forEach(b => b.onclick = async () => {
+  $$('#catalog .ttab:not(.addtrack)').forEach(b => b.onclick = async () => {
     curTrack = b.dataset.t; try { localStorage.setItem('csl-track', curTrack); } catch (e) { }
     const html = await catalogPanel(); const old = $('#catalog'); if (!old) return;
     old.outerHTML = html; const h = $('#lhHead'); if (h) h.textContent = curT().headline || '';
@@ -822,6 +856,9 @@ function bindCatalog() {
   });
   $$('#catalog .ccard[data-href]').forEach(el => el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); });
   $$('#catalog button.newl').forEach(b => b.onclick = () => newLesson(b.dataset.c));
+  $$('#catalog button.addtrack').forEach(b => b.onclick = () => editTrack(null));
+  $$('#catalog button.edittrack').forEach(b => b.onclick = () => editTrack(b.dataset.k));
+  $$('#catalog button.deltrack').forEach(b => b.onclick = () => delTrack(b.dataset.k));
   $$('#catalog button.addcard').forEach(b => b.onclick = () => editCard(null, b.dataset.t, +b.dataset.i));
   $$('#catalog button.editcard').forEach(b => b.onclick = () => editCard(b.dataset.k));
   $$('#catalog button.delcard').forEach(b => b.onclick = () => delCard(b.dataset.k));
