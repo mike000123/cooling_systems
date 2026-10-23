@@ -57,13 +57,26 @@ const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supaba
   auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
 }) : null;
 let session = null, me = null, recovering = false;
-const isTeacher = () => me && me.role === 'instructor';
+const isTeacher = () => !!me && ['instructor', 'staff', 'external'].includes(me.role);
+const isAdmin = () => !!me && me.role === 'instructor';      // Διαχειριστής
+const isStaff = () => !!me && me.role === 'staff';           // Εκπαιδευτής Academy
+const isExt = () => !!me && me.role === 'external';          // Εξωτερικός εκπαιδευτής (πακέτο)
+const ROLE_NAME = { instructor: 'Διαχειριστής', staff: 'Εκπαιδευτής Academy', external: 'Εξωτερικός εκπαιδευτής', student: 'Χρήστης' };
+// MT: στοιχεία του τρέχοντος εκπαιδευτή (RPC my_teacher, update_15)· EXTF: λειτουργίες πακέτου ανά τμήμα εξωτερικού εκπαιδευτή
+let MT = null, EXTF = {};
+const featOn = (k, cid) => !!(F[k] || (cid && EXTF[cid] && EXTF[cid][k]));
+const featAny = k => !!(F[k] || Object.values(EXTF).some(f => f[k]));
+const canCourse = key => !!key && (isAdmin() || (isStaff() && !!MT && (MT.courses || []).includes(key)));
+const canCopyAcademy = () => isAdmin() || isStaff() || (isExt() && !!MT && MT.active && !!(MT.plan && MT.plan.f_copy));
 
 async function loadMe() {
   me = null;
   if (!session) return;
   me = await q(sb.from('profiles').select('*').eq('id', session.user.id).single());
   me.email = session.user.email;
+  MT = null; EXTF = {};
+  try { const r = await sb.rpc('class_features'); if (!r.error) (r.data || []).forEach(x => EXTF[x.class_id] = x); } catch (e) { }
+  if (isTeacher() && !isAdmin()) { try { const r = await sb.rpc('my_teacher'); if (!r.error) MT = r.data; } catch (e) { } }
 }
 
 // ---------------------------------------------------------------- προσομοιώσεις
@@ -293,7 +306,7 @@ function notConfigured() {
     <p>Συμπληρώστε το <code>academy/config.js</code> με το URL και το «anon public» κλειδί του Supabase project (δείτε τον οδηγό εγκατάστασης).</p></div>`;
 }
 async function refreshUnread() {
-  if (!session || !me || !F.messages) { unread = 0; return; }
+  if (!session || !me || !featAny('messages')) { unread = 0; return; }
   const { count } = await sb.from('messages').select('id', { count: 'exact', head: true }).is('read_at', null).neq('sender_id', me.id);
   unread = count || 0; renderNav(location.hash.replace(/^#/, '') || '/');
 }
@@ -537,7 +550,7 @@ route(/^\/me$/, async tok => {
 });
 
 async function unreadPanel() {
-  if (!F.messages) return '';
+  if (!featAny('messages')) return '';
   const ms = await q(sb.from('messages').select('class_id,student_id,created_at,classes(name),student:profiles!messages_student_id_fkey(full_name)')
     .is('read_at', null).neq('sender_id', me.id).order('created_at', { ascending: false }));
   if (!ms.length) return '';
@@ -640,7 +653,7 @@ async function catalogPanel(opts) {
   // στην αρχική ανοίγει πρώτα η «δική μου» καρτέλα, εκτός αν ο χρήστης διάλεξε τομέα σε αυτή την επίσκεψη
   const isMine = catOpts.view === 'mine';   // «Ο πίνακάς μου»: μόνο τα δικά μου, ανά επίπεδο
   const card = (c, tag) => {
-    if (teach && !tag) return teachCard(c);
+    if (teach && !tag && (!teach.can || teach.can(c.key))) return teachCard(c);
     const open = !!c.classId, st = stateOf(c), sl = (c.sims || []).filter(k => names[k]);
     const sims = sl.slice(0, 2).map(k => `<a class="simlink" href="${esc(simHref(k))}" target="_blank" rel="noopener" title="${esc(names[k])}">◎ ${esc(names[k])}</a>`).join('')
       + (sl.length > 2 ? `<span class="simmore" title="${esc(sl.slice(2).map(k => names[k]).join(' · '))}">+${sl.length - 2}</span>` : '');
@@ -678,7 +691,7 @@ async function catalogPanel(opts) {
         <p class="small muted tstat">${intr}</p>
         <div class="ccact"><button class="btn accent small mkcls" data-k="${esc(c.key)}">＋ Ξεκίνα την ενότητα</button></div></div>`;
   };
-  const teachCard = c => { const h = teachCard0(c); return h.replace('<div class="ccact">', `<div class="ccact"><button class="btn small editcard" data-k="${esc(c.key)}" title="Επεξεργασία ονόματος και περιγραφής">✎</button>${c.custom ? `<button class="btn small delcard" data-k="${esc(c.key)}" title="Διαγραφή κάρτας">🗑</button>` : ''}`); };
+  const teachCard = c => { const h = teachCard0(c); return !isAdmin() ? h : h.replace('<div class="ccact">', `<div class="ccact"><button class="btn small editcard" data-k="${esc(c.key)}" title="Επεξεργασία ονόματος και περιγραφής">✎</button>${c.custom ? `<button class="btn small delcard" data-k="${esc(c.key)}" title="Διαγραφή κάρτας">🗑</button>` : ''}`); };
   const section = (num, title, sub, cards, act) => `<section class="lvl"><div class="lvlhead"><span class="lvlnum">${num}</span><div class="spacer"><h3>${esc(title)}</h3>${sub ? `<p class="muted small">${esc(sub)}</p>` : ''}</div>
       ${act || ''}<span class="lvlnav"><button class="btn small" data-d="-1" aria-label="Προηγούμενα">‹</button><button class="btn small" data-d="1" aria-label="Επόμενα">›</button></span></div>
       <div class="rail">${cards}</div></section>`;
@@ -732,14 +745,14 @@ async function catalogPanel(opts) {
     const legend = teach ? `<div class="catlegend small">${lg('ok', 'Διαθέσιμο στους χρήστες', 'έχει δημοσιευμένα μαθήματα')}${lg('warn', 'Σε προετοιμασία', 'η ενότητα υπάρχει, δεν έχει ακόμη δημοσιευμένο μάθημα')}${lg('', 'Χωρίς υλικό ακόμη', '«＋ Ξεκίνα την ενότητα» για να την ετοιμάσεις')}</div>`
       : acc ? `<div class="catlegend small">${lg('ok', '✓ Ανοιχτό για σένα', 'μπορείς να το παρακολουθήσεις τώρα')}${nLock ? lg('info', '🔒 Με κωδικό τμήματος', 'θέλει κωδικό από τον εκπαιδευτή') : ''}${lg('warn', 'Έρχεται σύντομα', 'πάτα 🔔 για να ενημερωθείς')}</div>` : '';
     body = `${acc || teach ? `<p class="catkick">${teach ? 'Όλος ο κατάλογος — πατήστε ένα μάθημα για να το εμπλουτίσετε' : 'Κατάλογος μαθημάτων'}</p>` : ''}
-    <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="row" style="gap:6px">${teach && T.custom ? `<button class="btn small edittrack" data-k="${esc(T.key)}">✎ Τομέας</button><button class="btn small deltrack" data-k="${esc(T.key)}" title="Διαγραφή τομέα">🗑</button>` : ''}<span class="pill">${summary}</span></span></div>
+    <div class="row between"><h2 style="margin:0">${esc(T.name)}</h2><span class="row" style="gap:6px">${teach && isAdmin() && T.custom ? `<button class="btn small edittrack" data-k="${esc(T.key)}">✎ Τομέας</button><button class="btn small deltrack" data-k="${esc(T.key)}" title="Διαγραφή τομέα">🗑</button>` : ''}<span class="pill">${summary}</span></span></div>
     <p class="muted" style="margin:6px 0 0">${all.length} μαθήματα σε ${T.levels.length} επίπεδα, από τα βασικά ως το επαγγελματικό.</p>${legend}
-    ${T.levels.map((l, i) => section(i + 1, lvName(l, i), l.tag || '', l.courses.map(c => card(c)).join(''), teach ? `<button class="btn small addcard" data-t="${esc(T.key)}" data-i="${i}">＋ Νέα κάρτα</button>` : '')).join('')}`;
+    ${T.levels.map((l, i) => section(i + 1, lvName(l, i), l.tag || '', l.courses.map(c => card(c)).join(''), teach && isAdmin() ? `<button class="btn small addcard" data-t="${esc(T.key)}" data-i="${i}">＋ Νέα κάρτα</button>` : '')).join('')}`;
   }
   const vis = teach ? TRACKS : TRACKS.filter(t => !t.custom || t.levels.some(l => l.courses.length));   // οι κενοί νέοι τομείς φαίνονται μόνο στον εκπαιδευτή
   const tabs = !isMine && (vis.length > 1 || teach) ? `<nav class="ttabs" role="tablist" aria-label="Τομέας">${vis.map(t => {
       const n = t.levels.reduce((a, l) => a + l.courses.length, 0), on = !isMine && t === T;
-      return `<button role="tab" class="ttab${on ? ' on' : ''}" aria-selected="${on}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}${teach ? '<button class="ttab addtrack"><b>＋ Νέος τομέας</b><span>σχολή / κατεύθυνση</span></button>' : ''}</nav>` : '';
+      return `<button role="tab" class="ttab${on ? ' on' : ''}" aria-selected="${on}" data-t="${esc(t.key)}"><b>${esc(t.short || t.name)}</b><span>${n} μαθήματα</span></button>`; }).join('')}${teach && isAdmin() ? '<button class="ttab addtrack"><b>＋ Νέος τομέας</b><span>σχολή / κατεύθυνση</span></button>' : ''}</nav>` : '';
   if (isMine) return `<div class="panel" id="catalog">${body}</div>`;
   return `<div class="panel catalog${tabs ? ' hastabs' : ''}" id="catalog">${tabs}<div class="tbody">${body}</div></div>`;
 }
@@ -766,8 +779,10 @@ async function newLesson(cid) {
 // προσωπικός χώρος: sidebar (Ο πίνακάς μου / Στατιστικά / Ρυθμίσεις)
 function meLayout(on, inner, cls) {
   const T = isTeacher() && !homePreview(), first = (me.full_name || '?').split(' ')[0];
-  const items = [['dash', '#/me', '🏠', 'Ο πίνακάς μου']].concat(T ? [['stats', '#/me/stats', '📊', 'Στατιστικά']] : [], [['set', '#/me/settings', '⚙️', 'Ρυθμίσεις']]);
-  return `<div class="mewrap${cls ? ' ' + cls : ''}"><aside class="side" aria-label="Ο λογαριασμός μου"><div class="who"><span class="av">${esc(first[0].toUpperCase())}</span><div><b>${esc(first)}</b><small>${T ? 'Εκπαιδευτής' : 'Σπουδαστής'}</small></div></div>
+  const items = [['dash', '#/me', '🏠', 'Ο πίνακάς μου']].concat(T ? [['stats', '#/me/stats', '📊', 'Στατιστικά']] : [],
+    T && isAdmin() ? [['teach', '#/me/teachers', '👥', 'Εκπαιδευτές'], ['plans', '#/me/plans', '📦', 'Πακέτα']] : [], [['set', '#/me/settings', '⚙️', 'Ρυθμίσεις']]);
+  const sub = T ? (ROLE_NAME[me.role] || 'Εκπαιδευτής') + (isExt() && MT && MT.plan ? ' · ' + MT.plan.name : '') : 'Σπουδαστής';
+  return `<div class="mewrap${cls ? ' ' + cls : ''}"><aside class="side" aria-label="Ο λογαριασμός μου"><div class="who"><span class="av">${esc(first[0].toUpperCase())}</span><div><b>${esc(first)}</b><small>${esc(sub)}</small></div></div>
     ${items.map(([k, h, i, t]) => `<a class="${k === on ? 'on' : ''}" href="${h}"${k === on ? ' aria-current="page"' : ''}>${i} ${t}</a>`).join('')}</aside><div class="mebody">${inner}</div></div>`;
 }
 const pvBanner = () => homePreview() ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε όπως ένας χρήστης (μόνο ανοιχτές ενότητες, χωρίς πρόχειρα). Η πρόοδος είναι η δική σας.</span><span class="row"><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : '';
@@ -906,9 +921,9 @@ function landingHTML(catHTML, who) {
 
 async function studentHome(tok) {
   const [D, asgs, subs, anns] = await Promise.all([studentBase(),
-    F.assignments ? q(sb.from('assignments').select('id,title,due_at,class_id,allow_late,classes(name)').order('due_at', { ascending: true, nullsFirst: false })) : none(),
-    F.assignments ? q(sb.from('submissions').select('assignment_id,status,points,graded_at,feedback,assignments(title,max_points,class_id)').eq('student_id', me.id)) : none(),
-    F.announcements ? q(sb.from('announcements').select('id,title,created_at,class_id,classes(name)').order('created_at', { ascending: false }).limit(5)) : none()]);
+    featAny('assignments') ? q(sb.from('assignments').select('id,title,due_at,class_id,allow_late,classes(name)').order('due_at', { ascending: true, nullsFirst: false })) : none(),
+    featAny('assignments') ? q(sb.from('submissions').select('assignment_id,status,points,graded_at,feedback,assignments(title,max_points,class_id)').eq('student_id', me.id)) : none(),
+    featAny('announcements') ? q(sb.from('announcements').select('id,title,created_at,class_id,classes(name)').order('created_at', { ascending: false }).limit(5)) : none()]);
   const unreadHTML = await unreadPanel();
   const catHTML = await catalogPanel({ view: 'mine', mine: D.mine, access: D.acc, prog: D.prog, extra: D.extra });
   if (stale(tok)) return;
@@ -917,14 +932,14 @@ async function studentHome(tok) {
   const todo = asgs.filter(a => !done.has(a.id));
   const graded = subs.filter(s => s.status === 'returned').sort((a, b) => new Date(b.graded_at) - new Date(a.graded_at)).slice(0, 5);
   const panels = [
-    F.assignments ? `<div class="panel"><h2>Εκκρεμείς εργασίες</h2>
+    featAny('assignments') ? `<div class="panel"><h2>Εκκρεμείς εργασίες</h2>
       ${todo.length ? `<ul class="list">${todo.map(a => `<li><a class="item" href="#/c/${a.class_id}/asg/${a.id}"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')}</span></span>${duePill(a)}</a></li>`).join('')}</ul>` : `<p class="muted">Καμία εκκρεμότητα.</p>`}
     </div>` : '',
     unreadHTML,
-    F.assignments ? `<div class="panel"><h2>Ανατροφοδότηση</h2>
+    featAny('assignments') ? `<div class="panel"><h2>Ανατροφοδότηση</h2>
       ${graded.length ? `<ul class="list">${graded.map(s => `<li><a class="item" href="#/c/${s.assignments.class_id}/asg/${s.assignment_id}"><span class="spacer">${esc(s.assignments.title)}</span><span class="pill ok">${s.points != null ? num(s.points) + '/' + num(s.assignments.max_points) : 'Σχόλια'}</span></a></li>`).join('')}</ul>` : `<p class="muted small">Δεν υπάρχει ακόμη.</p>`}
     </div>` : '',
-    F.announcements ? `<div class="panel"><h2>Ανακοινώσεις</h2>
+    featAny('announcements') ? `<div class="panel"><h2>Ανακοινώσεις</h2>
       ${anns.length ? `<ul class="list">${anns.map(a => `<li><a class="item" href="#/c/${a.class_id}/ann"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')} · ${fmtDay(a.created_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Καμία ανακοίνωση.</p>`}
     </div>` : ''].filter(Boolean);
   app.innerHTML = meLayout('dash', `${pvBanner()}<h1 style="margin-top:0">Ο πίνακάς μου</h1>
@@ -956,10 +971,14 @@ function duePill(a, sub) {
 }
 
 async function teacherHome(tok) {
-  const [classes, enr, pend] = await Promise.all([
+  if (isExt()) return extHome(tok);
+  const myKeys = isStaff() && MT ? (MT.courses || []) : [];
+  const [own, assigned, enr, pend] = await Promise.all([
     q(sb.from('classes').select('*').eq('owner', me.id).order('archived').order('created_at', { ascending: false })),
+    myKeys.length ? q(sb.from('classes').select('*').in('course_key', myKeys)) : none(),
     q(sb.from('enrollments').select('class_id')),
-    F.assignments ? q(sb.from('submissions').select('id,assignment_id,submitted_at,profiles(full_name),assignments(title,class_id)').is('graded_at', null).order('submitted_at')) : none()]);
+    featAny('assignments') ? q(sb.from('submissions').select('id,assignment_id,submitted_at,profiles(full_name),assignments(title,class_id)').is('graded_at', null).order('submitted_at')) : none()]);
+  const classes = own.concat(assigned.filter(a => !own.some(o => o.id === a.id)));
   const unreadHTML = await unreadPanel();
   const cnt = {}; enr.forEach(e => cnt[e.class_id] = (cnt[e.class_id] || 0) + 1);
   const pc = {}; pend.forEach(p => pc[p.assignments.class_id] = (pc[p.assignments.class_id] || 0) + 1);
@@ -967,7 +986,7 @@ async function teacherHome(tok) {
     classes.length ? q(sb.from('lessons').select('class_id,published').in('class_id', classes.map(c => c.id))) : none()]);
   const pub = {}, all = {}; ls.forEach(l => { all[l.class_id] = (all[l.class_id] || 0) + 1; if (l.published) pub[l.class_id] = (pub[l.class_id] || 0) + 1; });
   const byKey = {}; classes.forEach(c => { if (c.course_key) byKey[c.course_key] = c; });
-  const catHTML = await catalogPanel({ counts, teach: { classes, cnt, pc, pub, all, byKey } });
+  const catHTML = await catalogPanel({ counts, teach: { classes, cnt, pc, pub, all, byKey, can: isAdmin() ? null : canCourse } });
   if (stale(tok)) return;
   // ενότητες εκτός καταλόγου
   const other = classes.filter(c => !c.course_key && !catOf(c.id));
@@ -976,31 +995,216 @@ async function teacherHome(tok) {
       <h3>${esc(k.name)}</h3><p class="muted small cdesc">${esc(k.description || '')}</p><p class="small muted tstat">📚 ${pub[k.id] || 0} δημοσιευμένα · ${(all[k.id] || 0) - (pub[k.id] || 0)} πρόχειρα</p>
       <div class="ccact"><a class="btn accent small" href="#/c/${esc(k.id)}">Μαθήματα →</a><button class="btn small newl" data-c="${esc(k.id)}">+ Νέο μάθημα</button></div></div>`).join('')}</div></div>` : '';
   const nDecl = Object.values(counts).reduce((a, b) => a + b, 0), nDC = Object.keys(counts).length, k = ov && ov.kpi;
-  const tiles = `<div class="tiles sm">${k ? tile(k.users, 'χρήστες', `+${k.new7} σε 7 μέρες`) + tile(k.active7, 'ενεργοί (7 ημέρες)') : ''}${tile(nDecl, 'δηλώσεις 🔔', nDC ? `σε ${nDC} μαθήματα` : '')}${F.assignments ? tile(pend.length, 'προς βαθμολόγηση') : (k ? tile(k.completions, 'ολοκληρώσεις μαθημάτων') : '')}</div>`;
-  const panels = [unreadHTML, F.assignments ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
+  const tiles = `<div class="tiles sm">${k ? tile(k.users, 'χρήστες', `+${k.new7} σε 7 μέρες`) + tile(k.active7, 'ενεργοί (7 ημέρες)') : ''}${tile(nDecl, 'δηλώσεις 🔔', nDC ? `σε ${nDC} μαθήματα` : '')}${featAny('assignments') ? tile(pend.length, 'προς βαθμολόγηση') : (k ? tile(k.completions, 'ολοκληρώσεις μαθημάτων') : '')}</div>`;
+  const panels = [unreadHTML, featAny('assignments') ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
     ${pend.length ? `<ul class="list">${pend.slice(0, 12).map(p => `<li><a class="item" href="#/c/${p.assignments.class_id}/asg/${p.assignment_id}/grade/${p.id}"><span class="spacer"><b>${esc(p.profiles?.full_name || '')}</b><br><span class="muted small">${esc(p.assignments.title)} · ${fmtDay(p.submitted_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Όλα βαθμολογημένα.</p>`}
   </div>` : ''].filter(Boolean);
-  const acts = `<div class="tacts"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button><a class="btn accent" href="#/new-class" title="Για κλειστά τμήματα ή υλικό που δεν ανήκει σε κάρτα του καταλόγου">+ Ενότητα εκτός καταλόγου</a></div>`;
+  const acts = `<div class="tacts"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button>${isAdmin() ? '<a class="btn accent" href="#/new-class" title="Για κλειστά τμήματα ή υλικό που δεν ανήκει σε κάρτα του καταλόγου">+ Ενότητα εκτός καταλόγου</a>' : ''}</div>`;
+  const staffNote = (isStaff() ? `<div class="msg info small" style="margin:0 0 12px">👥 <b>Εκπαιδευτής Academy:</b> επεξεργάζεστε τα μαθήματα του καταλόγου που σας έχουν ανατεθεί (${myKeys.length ? myKeys.map(k => { const m = catOf(null, k); return esc(m ? m.c.name : k); }).join(', ') : 'κανένα ακόμη'}). Τα υπόλοιπα τα βλέπετε όπως οι χρήστες.</div>` : '');
   app.innerHTML = meLayout('dash', `<div class="thero" style="background-image:url(img/hero_teacher_bg.jpg)"><div class="thtxt"><div class="thbrand"><span>❄</span> Cooling Systems Lab Academy</div><h1 class="thbadge">Πίνακας καθηγητή</h1><p class="thhi">Καλώς ήρθες ξανά, <b>${esc((me.full_name || '').split(' ')[0])}</b>!</p><p class="thlead">Όλα τα εργαλεία που χρειάζεσαι για να οργανώσεις και να υποστηρίξεις τα μαθήματά σου.</p><ul class="thul"><li>Διαχείριση περιεχομένου και εργασιών</li><li>Παρακολούθηση προόδου και αξιολογήσεων</li><li>Επικοινωνία με μαθητές</li><li>Αναλυτικά στατιστικά και αναφορές</li></ul></div></div>${acts}
   <div class="tmain">${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}</div>
-  <aside class="tside" aria-label="Σύνοψη">${tiles}${panels.join('')}</aside>
+  <aside class="tside" aria-label="Σύνοψη">${staffNote}${tiles}${panels.join('')}</aside>
   ${otherHTML ? `<div class="tother">${otherHTML}</div>` : ''}`, 'tg');
   if (catHTML) bindCatalog();
   $$('.panel .ccard.tcl[data-href]').forEach(el => { if (!el.closest('#catalog')) el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); }; });
   $$('.panel button.newl').forEach(b => { if (!b.closest('#catalog')) b.onclick = () => newLesson(b.dataset.c); });
 }
 
+// ================================================================ ΕΚΠΑΙΔΕΥΤΕΣ & ΠΑΚΕΤΑ (update_15)
+const PLAN_FEATS = [['f_assignments', 'Εργασίες & βαθμολόγηση'], ['f_messages', 'Μηνύματα'], ['f_announcements', 'Ανακοινώσεις'], ['f_copy', 'Αντιγραφή μαθημάτων από την Academy']];
+const useBar = (a, b) => { const r = b ? a / b : 1; return `${a}/${b}<span class="ubar${r >= 1 ? ' full' : r >= .8 ? ' warn' : ''}"><i style="width:${Math.min(100, Math.round(r * 100))}%"></i></span>`; };
+const daysTo = d => d ? Math.round((new Date(d + 'T23:59:59') - Date.now()) / 864e5) : null;
+const fmtDate0 = d => d ? new Intl.DateTimeFormat('el-GR', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(d + 'T12:00:00')) : '—';
+function planBanner() {
+  const t = MT || {}, pl = t.plan;
+  if (!pl) return msgBox('warn', '📦 Δεν σας έχει οριστεί πακέτο ακόμη. Επικοινωνήστε με τον διαχειριστή της Academy.');
+  const dl = daysTo(t.valid_until);
+  return `<div class="msg ${t.active ? (dl !== null && dl <= 14 ? 'warn' : 'info') : 'err'} planbar"><span>📦 Πακέτο <b>${esc(pl.name)}</b> · ${t.active ? `ισχύει έως <b>${fmtDate0(t.valid_until)}</b>${dl !== null && dl <= 14 ? ` (σε ${dl} ${dl === 1 ? 'μέρα' : 'μέρες'})` : ''}` : `<b>έληξε</b> στις ${fmtDate0(t.valid_until)} — τα τμήματά σας είναι μόνο για ανάγνωση`}</span>
+    <span>τμήματα ${useBar(t.classes || 0, t.max_classes || 0)}</span><span>σπουδαστές ${useBar(t.students || 0, t.max_students || 0)}</span></div>`;
+}
+// πίνακας εξωτερικού εκπαιδευτή: τα τμήματά του + όλος ο δημόσιος κατάλογος (όπως τον βλέπει κάθε χρήστης)
+async function extHome(tok) {
+  const [classes, enr, ov] = await Promise.all([
+    q(sb.from('classes').select('*').eq('owner', me.id).order('archived').order('created_at', { ascending: false })),
+    q(sb.from('enrollments').select('class_id')),
+    sb.rpc('admin_overview').then(r => r.data || null, () => null)]);
+  const ls = classes.length ? await q(sb.from('lessons').select('class_id,published').in('class_id', classes.map(c => c.id))) : [];
+  const cnt = {}; enr.forEach(e => cnt[e.class_id] = (cnt[e.class_id] || 0) + 1);
+  const pub = {}, all = {}; ls.forEach(l => { all[l.class_id] = (all[l.class_id] || 0) + 1; if (l.published) pub[l.class_id] = (pub[l.class_id] || 0) + 1; });
+  const catHTML = await catalogPanel({});
+  const unreadHTML = await unreadPanel();
+  if (stale(tok)) return;
+  const t = MT || {}, pl = t.plan || {}, k = ov && ov.kpi, full = (t.classes || 0) >= (t.max_classes || 0);
+  const canNew = !!t.active && !full;
+  const newBtn = canNew ? '<a class="btn accent" href="#/new-class">＋ Νέο τμήμα</a>'
+    : `<button class="btn" disabled title="${!t.active ? 'Το πακέτο σας έχει λήξει' : 'Φτάσατε το όριο τμημάτων του πακέτου σας'}">＋ Νέο τμήμα 🔒</button>`;
+  const lockTiles = PLAN_FEATS.filter(([f]) => f !== 'f_copy' && !pl[f]).map(([, n]) => `<div class="tile lock"><b>—</b><span>${n}</span><small>δεν περιλαμβάνεται στο πακέτο σας</small></div>`).join('');
+  const tiles = `<div class="tiles sm">${tile(t.students || 0, 'σπουδαστές', `όριο ${t.max_students || 0}`)}${k ? tile(k.active7, 'ενεργοί (7 ημέρες)') + tile(k.completions, 'ολοκληρώσεις μαθημάτων') : ''}${lockTiles}</div>`;
+  const cards = classes.map(c => `<div class="ccard open tcl" data-href="#/c/${esc(c.id)}"><div class="row" style="gap:6px"><span class="pill ok">Ιδιωτικό · κωδικός ${esc(c.join_code)}</span>${c.archived ? '<span class="pill">Αρχειοθετημένο</span>' : ''}</div>
+      <h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.description || '')}</p><p class="small muted tstat">📚 ${pub[c.id] || 0} δημοσιευμένα · ${(all[c.id] || 0) - (pub[c.id] || 0)} πρόχειρα · 👥 ${cnt[c.id] || 0} σπουδαστές</p>
+      <div class="ccact"><a class="btn accent small" href="#/c/${esc(c.id)}">Μαθήματα →</a>${t.active ? `<button class="btn small newl" data-c="${esc(c.id)}">+ Νέο μάθημα</button>` : ''}</div></div>`).join('');
+  app.innerHTML = meLayout('dash', `${planBanner()}
+    <div class="row between" style="margin:6px 0 4px"><h1 style="margin:0">Ο πίνακάς μου</h1><span class="row"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button>${newBtn}</span></div>
+    ${tiles}${unreadHTML}
+    <div class="panel"><h2 style="margin-top:0">Τα τμήματά μου</h2>
+      ${classes.length ? `<div class="rail" style="flex-wrap:wrap;overflow:visible">${cards}</div>` : `<div class="empty">Δεν έχετε τμήματα ακόμη. ${canNew ? 'Φτιάξτε το πρώτο με «＋ Νέο τμήμα» και δώστε τον κωδικό του στους σπουδαστές σας.' : ''}</div>`}
+      <p class="muted small" style="margin:10px 0 0">${canCopyAcademy() ? '🎓 Μέσα σε κάθε τμήμα, το «Εισαγωγή από άλλη ενότητα» σας αφήνει να αντιγράψετε έτοιμα μαθήματα της Academy.' : '🔒 Η αντιγραφή έτοιμων μαθημάτων της Academy στα τμήματά σας περιλαμβάνεται σε άλλο πακέτο.'}</p></div>
+    <p class="catkick" style="margin-top:18px">Τα μαθήματα της Academy — ανοιχτά και για εσάς, όπως για κάθε χρήστη</p>
+    ${catHTML}`);
+  bindCatalog();
+  $$('.panel .ccard.tcl[data-href]').forEach(el => { if (!el.closest('#catalog')) el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); }; });
+  $$('.panel button.newl').forEach(b => { if (!b.closest('#catalog')) b.onclick = () => newLesson(b.dataset.c); });
+}
+
+// ---------------------------------------------------------------- διαχειριστής: εκπαιδευτές
+const roleP = r => ({ instructor: '<span class="pill bad">Διαχειριστής</span>', staff: '<span class="pill info">Εκπαιδευτής Academy</span>', external: '<span class="pill warn">Εξωτερικός</span>', student: '<span class="pill">Χρήστης</span>' })[r] || esc(r);
+const needUpd15 = (where, title) => { app.innerHTML = meLayout(where, `<h1 style="margin-top:0">${title}</h1>${msgBox('warn', 'Τρέξτε πρώτα το <code>update_15_teacher_roles.sql</code> στο Supabase (SQL Editor).')}`); };
+route(/^\/me\/teachers$/, async tok => {
+  if (needLogin()) return;
+  if (!isAdmin()) return go('#/me');
+  let T, P;
+  try { [T, P] = await Promise.all([q(sb.rpc('admin_teachers')), q(sb.from('plans').select('*').order('sort').order('name'))]); }
+  catch (er) { return needUpd15('teach', '👥 Εκπαιδευτές'); }
+  if (stale(tok)) return;
+  const pName = id => (P.find(p => p.id === id) || {}).name || id;
+  const nStaff = T.filter(t => t.role === 'staff').length, ext = T.filter(t => t.role === 'external');
+  const soon = ext.filter(t => t.active && daysTo(t.valid_until) !== null && daysTo(t.valid_until) <= 30), expired = ext.filter(t => !t.active);
+  const byPlan = {}; ext.forEach(t => { const n = t.plan_id ? pName(t.plan_id) : 'χωρίς πακέτο'; byPlan[n] = (byPlan[n] || 0) + 1; });
+  const cname = key => { const m = catOf(null, key); return m ? m.c.name : key; };
+  const row = t => {
+    const me0 = t.id === me.id, dl = daysTo(t.valid_until);
+    const pk = t.role === 'external' ? `${t.plan_id ? `<span class="pill ${t.plan_id === 'pro' ? 'ok' : ''}">${esc(pName(t.plan_id))}</span>` : '<span class="pill bad">χωρίς πακέτο</span>'}<br><span class="small">${t.valid_until ? (t.active ? 'έως ' : '') + fmtDate0(t.valid_until) : 'χωρίς λήξη'}</span>${!t.active ? ' <span class="pill bad">έληξε</span>' : dl !== null && dl <= 30 ? ` <span class="pill warn">σε ${dl} μέρες</span>` : ''}` : '<span class="muted">—</span>';
+    const use = t.role === 'external' ? `<span class="small">τμήματα ${useBar(t.classes, t.max_classes || 0)}<br>σπουδαστές ${useBar(t.students, t.max_students || 0)}</span>` : `<span class="small">${t.classes} ${t.classes === 1 ? 'ενότητα' : 'ενότητες'}</span>`;
+    const crs = t.role === 'instructor' ? 'όλα' : t.role === 'staff' ? ((t.courses || []).length ? `<span class="chips">${t.courses.map(k => `<span class="chip on">${esc(cname(k))}</span>`).join('')}</span>` : '<span class="muted small">κανένα ακόμη</span>') : '<span class="muted small">δικά του τμήματα</span>';
+    return `<tr data-s="${esc((t.full_name + ' ' + t.email).toLowerCase())}"><td><b>${esc(t.full_name)}</b><br><span class="muted small">${me0 ? 'εσείς' : esc(t.email)}</span></td><td>${roleP(t.role)}</td><td>${pk}</td><td>${use}</td><td>${crs}</td>
+      <td>${me0 ? '' : `<button class="btn small" data-ed="${esc(t.id)}" title="Επεξεργασία">✎</button>`}</td></tr>`;
+  };
+  app.innerHTML = meLayout('teach', `<div class="row between"><h1 style="margin-top:0">👥 Εκπαιδευτές</h1><button class="btn primary" id="tnew">＋ Νέος εκπαιδευτής</button></div>
+    <div class="tiles">${tile(nStaff, 'Εκπαιδευτές Academy', 'εμπλουτίζουν τον κατάλογο')}${tile(ext.length, 'Εξωτερικοί', Object.entries(byPlan).map(([n, c]) => `${c} ${esc(n)}`).join(' · ') || '—')}
+      ${tile(soon.length, 'Λήγουν σε 30 μέρες', soon.map(t => esc(t.full_name)).join(', '))}${tile(expired.length, 'Έληξαν', expired.length ? 'τα τμήματά τους είναι μόνο για ανάγνωση' : '')}</div>
+    <div class="panel"><div class="row between"><h2 style="margin:0">Λογαριασμοί εκπαιδευτών</h2><input class="inp" id="tq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:260px"></div>
+    <div class="tablewrap" style="margin-top:10px"><table class="t"><thead><tr><th>Όνομα</th><th>Ρόλος</th><th>Πακέτο · λήξη</th><th>Χρήση</th><th>Μαθήματα καταλόγου</th><th></th></tr></thead><tbody id="tb">${T.map(row).join('')}</tbody></table></div>
+    <p class="muted small">Ο ρόλος και το πακέτο αλλάζουν μόνο από εδώ (μόνο ο Διαχειριστής βλέπει αυτή τη σελίδα). Τα όρια ελέγχονται στη βάση, άρα δεν παρακάμπτονται. Νέος εκπαιδευτής = ένας χρήστης που έχει ήδη κάνει εγγραφή στην Academy.</p></div>`);
+  $('#tq').oninput = e => { const v = e.target.value.trim().toLowerCase(); $$('#tb tr').forEach(r => r.hidden = !!v && !r.dataset.s.includes(v)); };
+  $$('[data-ed]').forEach(b => b.onclick = () => teacherModal(T.find(t => t.id === b.dataset.ed), P));
+  $('#tnew').onclick = async () => {
+    const mail = prompt('Email του χρήστη που θα γίνει εκπαιδευτής\n(πρέπει να έχει ήδη κάνει εγγραφή στην Academy):'); if (!mail || !mail.trim()) return;
+    try {
+      const u = await q(sb.rpc('admin_find_user', { mail: mail.trim() }));
+      if (!u) return toast('Δεν βρέθηκε χρήστης με αυτό το email. Ζητήστε του να κάνει πρώτα εγγραφή.', true);
+      const ex = T.find(t => t.id === u.id);
+      teacherModal(ex || { ...u, role: 'external', plan_id: (P[0] || {}).id || null, valid_until: null, extra_classes: 0, extra_students: 0, payment_note: '', courses: [], _new: true }, P);
+    } catch (er) { toast(errText(er), true); }
+  };
+});
+function teacherModal(t, P) {
+  const iso = d => d.toISOString().slice(0, 10);
+  const allC = TRACKS.flatMap(tr => tr.levels.flatMap(l => l.courses.map(c => ({ c, tr }))));
+  const have = new Set(t.courses || []);
+  const wrap = document.createElement('div'); wrap.className = 'mbg';
+  wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="Επεξεργασία εκπαιδευτή"><form class="f" id="tm">
+    <div class="row between"><h2 style="margin:0">${esc(t.full_name)}</h2><button type="button" class="btn small" id="tmx" aria-label="Κλείσιμο">✕</button></div>
+    <p class="muted small" style="margin:2px 0 12px">${esc(t.email || '')}${t._new ? ' · νέος εκπαιδευτής' : ''}</p>
+    <div class="kv"><b>Ρόλος</b><div class="row">${[['external', 'Εξωτερικός εκπαιδευτής'], ['staff', 'Εκπαιδευτής Academy'], ['student', 'Χρήστης (χωρίς δικαιώματα)']].map(([v, n]) => `<label class="chk"><input type="radio" name="role" value="${v}" ${t.role === v ? 'checked' : ''}> ${n}</label>`).join('')}</div></div>
+    <div class="kv" data-for="external"><b>Πακέτο</b><div class="row"><select name="plan" class="sel">${P.map(p => `<option value="${esc(p.id)}" ${p.id === t.plan_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="muted small" id="tlim"></span></div>
+      <b>Ισχύει έως</b><div class="row"><input type="date" name="until" class="sel" value="${esc(t.valid_until || '')}"><button type="button" class="btn small" data-add="1">+1 μήνας</button><button type="button" class="btn small" data-add="12">+1 έτος</button></div>
+      <b>Εξαιρέσεις</b><div class="row"><label class="small">+ τμήματα <input type="number" name="xc" min="0" class="sel" style="width:80px" value="${t.extra_classes || 0}"></label><label class="small">+ σπουδαστές <input type="number" name="xs" min="0" class="sel" style="width:90px" value="${t.extra_students || 0}"></label></div>
+      <b>Σημείωση πληρωμής</b><input type="text" name="note" maxlength="500" class="sel" value="${esc(t.payment_note || '')}" placeholder="π.χ. Τράπεζα 12/09 · 120 € · τιμολόγιο 0042"></div>
+    <div data-for="external" class="note" style="margin-top:12px">Όταν λήξει το πακέτο, τα τμήματά του μένουν ορατά στους σπουδαστές του (μόνο ανάγνωση)· δεν μπορεί να κάνει αλλαγές, νέα τμήματα ή νέες εγγραφές μέχρι την ανανέωση.</div>
+    <div data-for="staff"><b>Μαθήματα καταλόγου που επεξεργάζεται</b><p class="muted small" style="margin:2px 0 6px">Βλέπει και επεξεργάζεται μόνο αυτά· δεν αλλάζει τον κατάλογο, ρόλους ή πακέτα.</p>
+      <div class="cpick">${TRACKS.map(tr => `<details ${tr.levels.some(l => l.courses.some(c => have.has(c.key))) ? 'open' : ''}><summary><b>${esc(tr.short || tr.name)}</b></summary>${tr.levels.flatMap(l => l.courses).map(c => `<label class="chk small"><input type="checkbox" name="crs" value="${esc(c.key)}" ${have.has(c.key) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}</details>`).join('')}</div></div>
+    <div class="row between" style="margin-top:16px"><span class="muted small">${allC.length} μαθήματα στον κατάλογο</span><span class="row"><button type="button" class="btn" id="tmc">Άκυρο</button><button class="btn primary">Αποθήκευση</button></span></div>
+  </form></div>`;
+  document.body.appendChild(wrap);
+  const f = $('#tm', wrap), E = n => f.elements.namedItem(n), close = () => wrap.remove();
+  const sync = () => { const r = E('role').value; $$('[data-for]', wrap).forEach(el => el.hidden = el.dataset.for !== r);
+    const p = P.find(x => x.id === E('plan').value); $('#tlim', wrap).textContent = p ? `όρια: ${p.max_classes} τμήματα · ${p.max_students} σπουδαστές` : ''; };
+  $$('input[name=role]', wrap).forEach(x => x.onchange = sync); E('plan').onchange = sync; sync();
+  $$('[data-add]', wrap).forEach(b => b.onclick = () => {
+    const base = E('until').value && new Date(E('until').value) > new Date() ? new Date(E('until').value) : new Date();
+    base.setMonth(base.getMonth() + +b.dataset.add); E('until').value = iso(base);
+  });
+  $('#tmx', wrap).onclick = close; $('#tmc', wrap).onclick = close;
+  wrap.onclick = e => { if (e.target === wrap) close(); };
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const r = E('role').value;
+    if (r === 'external' && !E('until').value) return toast('Ορίστε ημερομηνία λήξης του πακέτου.', true);
+    if (r === 'student' && !confirm(`Να αφαιρεθεί ο ρόλος εκπαιδευτή από «${t.full_name}»;`)) return;
+    try {
+      await q(sb.rpc('admin_set_teacher', { uid: t.id, new_role: r, plan: E('plan').value || null, until: E('until').value || null,
+        x_classes: +E('xc').value || 0, x_students: +E('xs').value || 0, note: E('note').value.trim(), courses: $$('input[name=crs]:checked', wrap).map(x => x.value) }));
+      close(); toast('Αποθηκεύτηκε.'); render();
+    } catch (er) { toast(errText(er), true); }
+  };
+}
+
+// ---------------------------------------------------------------- διαχειριστής: πακέτα
+route(/^\/me\/plans$/, async tok => {
+  if (needLogin()) return;
+  if (!isAdmin()) return go('#/me');
+  let P, T;
+  try { [P, T] = await Promise.all([q(sb.from('plans').select('*').order('sort').order('name')), q(sb.rpc('admin_teachers'))]); }
+  catch (er) { return needUpd15('plans', '📦 Πακέτα εκπαιδευτών'); }
+  if (stale(tok)) return;
+  const nUse = id => T.filter(t => t.role === 'external' && t.plan_id === id).length;
+  const li = (ok, txt) => `<li class="${ok ? '' : 'no'}">${ok ? '✓' : '✕'} ${txt}</li>`;
+  const card = p => `<div class="plan${p.id === 'pro' ? ' hl' : ''}"><span class="pill">Εξωτερικοί εκπαιδευτές</span><h3>${esc(p.name)}</h3><div class="price">${esc(p.price_note || '—')}</div>
+    <ul>${li(true, `έως ${p.max_classes} ${p.max_classes === 1 ? 'ιδιωτικό τμήμα' : 'ιδιωτικά τμήματα'} με κωδικό`)}${li(true, `έως ${p.max_students} σπουδαστές`)}${li(true, 'δικά του μαθήματα, αρχεία, βίντεο, προσομοιώσεις')}${li(true, 'πρόοδος σπουδαστών & στατιστικά τμημάτων')}${li(true, 'πρόσβαση σε όλα τα δημόσια μαθήματα της Academy')}
+      ${PLAN_FEATS.map(([k, n]) => li(p[k], n.toLowerCase())).join('')}</ul>
+    <div class="row" style="margin-top:auto"><button class="btn small" data-ed="${esc(p.id)}">Επεξεργασία</button><span class="muted small">${nUse(p.id)} εκπαιδευτές</span></div></div>`;
+  const staffCard = `<div class="plan"><span class="pill info">Ομάδα Academy</span><h3>Εκπαιδευτής Academy</h3><div class="price">—<small class="muted small"> δουλεύει για την Academy</small></div>
+    <ul>${li(true, 'επεξεργάζεται μόνο τα μαθήματα του καταλόγου που του αναθέτετε')}${li(true, 'δημοσιεύει υλικό στους χρήστες της Academy')}${li(true, 'στατιστικά για τα δικά του μαθήματα')}${li(false, 'δεν αλλάζει κατάλογο, ρόλους, πακέτα')}${li(false, 'δεν βλέπει email χρηστών εκτός των μαθημάτων του')}</ul>
+    <div class="row" style="margin-top:auto"><a class="btn small" href="#/me/teachers">Ανάθεση μαθημάτων →</a><span class="muted small">${T.filter(t => t.role === 'staff').length} εκπαιδευτές</span></div></div>`;
+  app.innerHTML = meLayout('plans', `<div class="row between"><h1 style="margin-top:0">📦 Πακέτα εκπαιδευτών</h1><button class="btn" id="pnew">＋ Νέο πακέτο</button></div>
+    <p class="muted" style="margin-top:-6px">Ορίζετε μία φορά τι περιλαμβάνει κάθε πακέτο. Μετά, σε κάθε εξωτερικό εκπαιδευτή διαλέγετε πακέτο και ημερομηνία λήξης (👥 Εκπαιδευτές).</p>
+    <div class="plans">${P.map(card).join('')}${staffCard}</div><div id="pedit"></div>
+    <p class="muted small" style="margin-top:12px">Οι πληρωμές καταγράφονται από εσάς (σημείωση πληρωμής + ημερομηνία λήξης στον εκπαιδευτή). Η τιμή εδώ είναι μόνο ενημερωτική.</p>`);
+  const edit = p => {
+    const box = $('#pedit'), nw = !p; p = p || { id: '', name: '', price_note: '', max_classes: 1, max_students: 30, sort: P.length + 1 };
+    box.innerHTML = `<div class="panel" style="margin-top:14px"><h2>${nw ? 'Νέο πακέτο' : `Επεξεργασία πακέτου «${esc(p.name)}»`}</h2><form class="f" id="pf"><div class="kv">
+      ${nw ? '<b>Κωδικός</b><input type="text" name="id" class="sel" style="width:200px" pattern="[a-z0-9_-]{1,30}" placeholder="π.χ. school" required>' : ''}
+      <b>Όνομα</b><input type="text" name="name" class="sel" style="width:220px" maxlength="60" value="${esc(p.name)}" required>
+      <b>Τιμή (ενημερωτικά)</b><input type="text" name="price" class="sel" style="width:220px" maxlength="80" value="${esc(p.price_note || '')}" placeholder="π.χ. 10 € / μήνα">
+      <b>Μέγιστα τμήματα</b><input type="number" name="mc" class="sel" style="width:90px" min="0" value="${p.max_classes}">
+      <b>Μέγιστοι σπουδαστές</b><input type="number" name="ms" class="sel" style="width:90px" min="0" value="${p.max_students}">
+      <b>Λειτουργίες</b><div class="row">${PLAN_FEATS.map(([k, n]) => `<label class="chk"><input type="checkbox" name="${k}" ${p[k] ? 'checked' : ''}> ${n}</label>`).join('')}</div></div>
+      <div class="row" style="margin-top:12px"><button class="btn primary">Αποθήκευση</button><button type="button" class="btn" id="pfx">Άκυρο</button>${nw ? '' : `<button type="button" class="btn danger" id="pfd" style="margin-left:auto">Διαγραφή πακέτου</button>`}</div></form></div>`;
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const f = $('#pf'), E = n => f.elements.namedItem(n);
+    $('#pfx').onclick = () => box.innerHTML = '';
+    if ($('#pfd')) $('#pfd').onclick = async () => {
+      if (!confirm(`Διαγραφή του πακέτου «${p.name}»;${nUse(p.id) ? `\n\n${nUse(p.id)} εκπαιδευτές θα μείνουν χωρίς πακέτο (τα τμήματά τους γίνονται μόνο για ανάγνωση).` : ''}`)) return;
+      try { await q(sb.from('plans').delete().eq('id', p.id)); toast('Το πακέτο διαγράφηκε.'); render(); } catch (er) { toast(errText(er), true); }
+    };
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const row = { name: E('name').value.trim(), price_note: E('price').value.trim(), max_classes: +E('mc').value || 0, max_students: +E('ms').value || 0 };
+      PLAN_FEATS.forEach(([k]) => row[k] = E(k).checked);
+      try {
+        if (nw) await q(sb.from('plans').insert({ id: E('id').value.trim().toLowerCase(), sort: p.sort, ...row }));
+        else await q(sb.from('plans').update(row).eq('id', p.id));
+        toast('Αποθηκεύτηκε.'); render();
+      } catch (er) { toast(errText(er), true); }
+    };
+  };
+  $$('[data-ed]').forEach(b => b.onclick = () => edit(P.find(p => p.id === b.dataset.ed)));
+  $('#pnew').onclick = () => edit(null);
+});
+
 route(/^\/new-class$/, async () => {
   if (needLogin()) return;
-  if (!isTeacher()) return go('#/');
-  app.innerHTML = `<div class="panel" style="max-width:640px"><h1>Ενότητα εκτός καταλόγου</h1><form class="f" id="fm">
+  if (!isTeacher() || isStaff()) return go('#/me');
+  const X = isExt();
+  if (X && MT && (!MT.active || MT.classes >= MT.max_classes)) { toast(!MT.active ? 'Το πακέτο σας έχει λήξει.' : `Φτάσατε το όριο τμημάτων του πακέτου σας (${MT.max_classes}).`, true); return go('#/me'); }
+  app.innerHTML = `<div class="panel" style="max-width:640px"><h1>${X ? 'Νέο τμήμα' : 'Ενότητα εκτός καταλόγου'}</h1>${X ? '<p class="muted small">Το τμήμα είναι ιδιωτικό: οι σπουδαστές σας μπαίνουν με τον κωδικό του τμήματος, που θα δείτε στην καρτέλα «Πρόσβαση».</p>' : ''}<form class="f" id="fm">
     <label>Τίτλος<input type="text" name="name" maxlength="120" placeholder="π.χ. Βασικές αρχές θερμοδυναμικής" required></label>
     <label>Περιγραφή (προαιρετικά)<textarea name="desc" style="min-height:70px"></textarea></label>
-    <label class="chk"><input type="checkbox" name="open" checked> <span>Ανοιχτή σε όλους τους εγγεγραμμένους χρήστες (χωρίς τσεκάρισμα: πρόσβαση μόνο με κωδικό)</span></label>
+    ${X ? '' : '<label class="chk"><input type="checkbox" name="open" checked> <span>Ανοιχτή σε όλους τους εγγεγραμμένους χρήστες (χωρίς τσεκάρισμα: πρόσβαση μόνο με κωδικό)</span></label>'}
     <div class="row"><button class="btn primary">Δημιουργία</button><a href="#/me">Άκυρο</a></div></form></div>`;
   $('#fm').onsubmit = async e => {
     e.preventDefault();
-    try { const c = await q(sb.from('classes').insert({ name: e.target.elements.namedItem('name').value.trim(), description: e.target.desc.value.trim(), is_open: e.target.open.checked, owner: me.id }).select().single()); go(c.is_open ? `#/c/${c.id}` : `#/c/${c.id}/students`); }
+    try { const c = await q(sb.from('classes').insert({ name: e.target.elements.namedItem('name').value.trim(), description: e.target.desc.value.trim(), is_open: !X && e.target.open.checked, owner: me.id }).select().single()); if (X) await loadMe(); go(c.is_open ? `#/c/${c.id}` : `#/c/${c.id}/students`); }
     catch (er) { toast(errText(er), true); }
   };
 });
@@ -1012,7 +1216,9 @@ const inPreview = cid => { try { return sessionStorage.getItem(PREVIEW_KEY) === 
 async function loadClass(cid) {
   const c = await q(sb.from('classes').select('*').eq('id', cid).maybeSingle());
   if (!c) throw new Error('Η ενότητα δεν βρέθηκε ή δεν έχετε πρόσβαση.');
-  c.owner_me = c.owner === me.id;
+  c.own = c.owner === me.id;
+  c.owner_me = c.own || canCourse(c.course_key);   // ιδιοκτήτης ή μάθημα καταλόγου που μπορεί να επεξεργαστεί
+  c.frozen = c.own && isExt() && !!MT && !MT.active;
   c.preview = c.owner_me && inPreview(cid);     // ο διαχειριστής βλέπει όπως ένας χρήστης
   c.mine = c.owner_me && !c.preview;
   return c;
@@ -1076,12 +1282,13 @@ function track(c, lessonId, kind, ref, label) {
 }
 function classHead(c, tab) {
   const tabs = [['', 'Μαθήματα']];
-  if (F.assignments) tabs.push(['asg', 'Εργασίες']);
-  if (F.announcements) tabs.push(['ann', 'Ανακοινώσεις']);
-  if (F.messages) tabs.push(['chat', 'Μηνύματα']);
-  if (c.mine) tabs.push(['students', 'Πρόσβαση'], ['settings', 'Ρυθμίσεις']);
+  if (featOn('assignments', c.id)) tabs.push(['asg', 'Εργασίες']);
+  if (featOn('announcements', c.id)) tabs.push(['ann', 'Ανακοινώσεις']);
+  if (featOn('messages', c.id)) tabs.push(['chat', 'Μηνύματα']);
+  if (c.mine && c.own) tabs.push(['students', 'Πρόσβαση'], ['settings', 'Ρυθμίσεις']);
   return `${c.preview ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε την ενότητα όπως οι χρήστες (χωρίς πρόχειρα).</span><span class="row"><button class="btn small" id="prev-reset">Μηδενισμός προόδου μου</button><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : ''}
     <p class="small"><a href="#/me">← Ο πίνακάς μου</a></p>
+    ${c.frozen ? msgBox('warn', '📦 <b>Το πακέτο σας έχει λήξει.</b> Το τμήμα είναι μόνο για ανάγνωση: οι σπουδαστές βλέπουν το υλικό, αλλά δεν γίνονται αλλαγές ή νέες εγγραφές μέχρι την ανανέωση.') + '<div style="height:10px"></div>' : ''}
     ${c.mine ? `<div style="float:right"><button class="btn small" id="prev-on">👁 Προβολή ως χρήστης</button></div>` : ''}
     <h1>${esc(c.name)}${c.archived ? ' <span class="pill">Αρχειοθετημένο</span>' : ''}</h1>
     ${c.description ? `<p class="muted" style="margin:0">${esc(c.description)}</p>` : ''}
@@ -1092,8 +1299,8 @@ route(/^\/c\/([\w-]{36})(?:\/(asg|ann|students|settings))?$/, async (cid, tab, t
   if (needLogin()) return;
   tab = tab || '';
   const c = await loadClass(cid); if (stale(tok)) return;
-  if (!c.mine && (tab === 'students' || tab === 'settings')) return go('#/c/' + cid);
-  if ((tab === 'asg' && !F.assignments) || (tab === 'ann' && !F.announcements)) return go('#/c/' + cid);
+  if (!(c.mine && c.own) && (tab === 'students' || tab === 'settings')) return go('#/c/' + cid);
+  if ((tab === 'asg' && !featOn('assignments', cid)) || (tab === 'ann' && !featOn('announcements', cid))) return go('#/c/' + cid);
   const body = await ({ '': tabLessons, asg: tabAssignments, ann: tabAnnouncements, students: tabStudents, settings: tabSettings })[tab](c, tok);
   if (stale(tok) || body == null) return;
   app.innerHTML = classHead(c, tab) + body.html;
@@ -1218,11 +1425,20 @@ function reorderPanel(c, ls) {
 async function importPanel(c) {
   const box = $('#imppanel'); if (box.innerHTML && box.dataset.mode !== 'reord') { box.innerHTML = ''; box.dataset.mode = ''; return; }
   box.dataset.mode = 'imp';
-  const others = await myOtherClasses(c.id);
-  if (!others.length) { box.innerHTML = msgBox('info', 'Δεν έχετε άλλες ενότητες για εισαγωγή.') + '<div style="height:12px"></div>'; return; }
+  let others = await myOtherClasses(c.id);
+  // υλικό της Academy (ανοιχτά μαθήματα του καταλόγου): Εκπαιδευτής Academy και εξωτερικοί με το αντίστοιχο πακέτο
+  let lockNote = '';
+  if (!isAdmin()) {
+    if (canCopyAcademy()) {
+      const ac = (await q(sb.from('classes').select('id,name,archived,course_key').not('course_key', 'is', null).eq('is_open', true).eq('archived', false).order('name')))
+        .filter(x => x.id !== c.id && !others.some(o => o.id === x.id));
+      others = others.concat(ac.map(x => { const m = catOf(x.id, x.course_key); return { ...x, name: '🎓 Academy · ' + (m ? m.c.name : x.name) }; }));
+    } else if (isExt()) lockNote = msgBox('info', '🔒 Η αντιγραφή έτοιμων μαθημάτων από την Academy περιλαμβάνεται σε άλλο πακέτο. Ρωτήστε τον διαχειριστή για αναβάθμιση.') + '<div style="height:10px"></div>';
+  }
+  if (!others.length) { box.innerHTML = (lockNote || msgBox('info', 'Δεν έχετε άλλες ενότητες για εισαγωγή.')) + '<div style="height:12px"></div>'; return; }
   const ls = await q(sb.from('lessons').select('id,class_id,title,position,published').in('class_id', others.map(o => o.id)).order('position').order('created_at'));
   const have = new Set((await q(sb.from('lessons').select('title').eq('class_id', c.id))).map(x => x.title.trim()));
-  box.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Εισαγωγή μαθημάτων από άλλη ενότητα</h2>
+  box.innerHTML = lockNote + `<div class="panel" style="margin-bottom:14px"><h2>Εισαγωγή μαθημάτων από άλλη ενότητα</h2>
     <p class="muted small">Επιλέξτε μαθήματα. Αντιγράφονται με όλο το περιεχόμενο (σύνοψη, βίντεο, προσομοιώσεις, αυτοέλεγχο, αρχεία) στο τέλος αυτής της ενότητας. Τα πρωτότυπα δεν αλλάζουν.</p>
     ${others.map(o => { const mine = ls.filter(l => l.class_id === o.id); return `<details class="impcls" ${others.length === 1 || mine.some(l => have.has(l.title.trim())) ? 'open' : ''}><summary><b>${esc(o.name)}</b> <span class="muted small">(${mine.length} μαθήματα)</span></summary>
       ${mine.length ? `<label class="chk small" style="margin:6px 0"><input type="checkbox" data-all="${o.id}"> <b>Όλα</b></label>${mine.some(l => have.has(l.title.trim())) && mine.some(l => !have.has(l.title.trim())) ? ` <button type="button" class="btn small" data-miss="${o.id}">Επιλογή μόνο όσων λείπουν</button>` : ''}
@@ -1301,8 +1517,8 @@ async function tabAnnouncements(c) {
 async function tabStudents(c) {
   const [enr, as, subs] = await Promise.all([
     q(sb.from('enrollments').select('user_id,joined_at,profiles(full_name)').eq('class_id', c.id)),
-    F.assignments ? q(sb.from('assignments').select('id,title,max_points').eq('class_id', c.id).order('due_at', { ascending: true, nullsFirst: false }).order('created_at')) : none(),
-    F.assignments ? q(sb.from('submissions').select('assignment_id,student_id,points,graded_at')) : none()]);
+    featOn('assignments', c.id) ? q(sb.from('assignments').select('id,title,max_points').eq('class_id', c.id).order('due_at', { ascending: true, nullsFirst: false }).order('created_at')) : none(),
+    featOn('assignments', c.id) ? q(sb.from('submissions').select('assignment_id,student_id,points,graded_at')) : none()]);
   const ids = new Set(as.map(a => a.id));
   const byS = {}; subs.filter(s => ids.has(s.assignment_id)).forEach(s => (byS[s.student_id] = byS[s.student_id] || []).push(s));
   enr.sort((a, b) => (a.profiles?.full_name || '').localeCompare(b.profiles?.full_name || '', 'el'));
@@ -1310,9 +1526,9 @@ async function tabStudents(c) {
   return {
     html: `${c.is_open ? msgBox('ok', '<b>Ανοιχτή ενότητα:</b> τη βλέπει κάθε εγγεγραμμένος χρήστης, χωρίς κωδικό. Για πρόσβαση μόνο με κωδικό, αλλάξτε το στις <a href="#/c/' + c.id + '/settings">Ρυθμίσεις</a>.') + '<div style="height:14px"></div>' : ''}
     <div class="two"><div class="panel"><h2>Μέλη με κωδικό (${enr.length})</h2>
-      ${enr.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Όνομα</th><th>Εγγραφή</th>${F.assignments ? '<th>Υποβολές</th>' : ''}<th></th></tr></thead><tbody>
-      ${enr.map(e => `<tr><td>${esc(e.profiles?.full_name || '—')}</td><td>${fmtDay(e.joined_at)}</td>${F.assignments ? `<td>${(byS[e.user_id] || []).length}/${as.length}</td>` : ''}
-        <td>${F.messages ? `<a class="btn small" href="#/c/${c.id}/chat/${e.user_id}">Μήνυμα</a> ` : ''}<button class="btn small danger" data-rm="${e.user_id}">Αφαίρεση</button></td></tr>`).join('')}
+      ${enr.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Όνομα</th><th>Εγγραφή</th>${featOn('assignments', c.id) ? '<th>Υποβολές</th>' : ''}<th></th></tr></thead><tbody>
+      ${enr.map(e => `<tr><td>${esc(e.profiles?.full_name || '—')}</td><td>${fmtDay(e.joined_at)}</td>${featOn('assignments', c.id) ? `<td>${(byS[e.user_id] || []).length}/${as.length}</td>` : ''}
+        <td>${featOn('messages', c.id) ? `<a class="btn small" href="#/c/${c.id}/chat/${e.user_id}">Μήνυμα</a> ` : ''}<button class="btn small danger" data-rm="${e.user_id}">Αφαίρεση</button></td></tr>`).join('')}
       </tbody></table></div>` : `<div class="empty">${c.is_open ? 'Δεν χρειάζονται μέλη σε ανοιχτή ενότητα.' : 'Κανείς ακόμη. Δώστε τον κωδικό ή τον σύνδεσμο σε όσους θέλετε να έχουν πρόσβαση.'}</div>`}
     </div><div class="stack"><div class="panel stack"><h2>Πρόσκληση</h2>
       <p class="small">${c.is_open ? 'Ο κωδικός χρειάζεται μόνο αν κλείσετε την ενότητα.' : 'Οι χρήστες κάνουν μόνοι τους εγγραφή και αποκτούν πρόσβαση με τον κωδικό:'}</p>
@@ -1320,7 +1536,7 @@ async function tabStudents(c) {
       <p class="small">ή με τον σύνδεσμο:</p>
       <div class="row"><input class="inp" readonly value="${esc(link)}" id="lnk"><button class="btn small" id="copy">Αντιγραφή</button></div>
       <p class="muted small">Με νέο κωδικό, ο παλιός παύει να ισχύει (όσοι μπήκαν ήδη παραμένουν).</p></div>
-      ${F.assignments ? `<div class="panel stack"><h2>Βαθμολόγιο</h2><p class="small">Λήψη όλων των βαθμών της ενότητας σε αρχείο για Excel.</p>
+      ${featOn('assignments', c.id) ? `<div class="panel stack"><h2>Βαθμολόγιο</h2><p class="small">Λήψη όλων των βαθμών της ενότητας σε αρχείο για Excel.</p>
       <div><button class="btn" id="csv">Λήψη CSV</button></div></div>` : ''}</div></div>`,
     bind: () => {
       $('#copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Αντιγράφηκε.'); } catch { $('#lnk').select(); } };
@@ -1349,7 +1565,7 @@ async function tabSettings(c) {
     html: `<div class="panel" style="max-width:680px"><h2>Ρυθμίσεις ενότητας</h2><form class="f" id="fs">
       <label>Τίτλος<input type="text" name="name" maxlength="120" value="${esc(c.name)}" required></label>
       <label>Περιγραφή<textarea name="desc" style="min-height:70px">${esc(c.description)}</textarea></label>
-      <label class="chk"><input type="checkbox" name="open" ${c.is_open ? 'checked' : ''}> <span>Ανοιχτή σε όλους τους εγγεγραμμένους χρήστες (αλλιώς πρόσβαση μόνο με κωδικό)</span></label>
+      ${isExt() ? '' : `<label class="chk"><input type="checkbox" name="open" ${c.is_open ? 'checked' : ''}> <span>Ανοιχτή σε όλους τους εγγεγραμμένους χρήστες (αλλιώς πρόσβαση μόνο με κωδικό)</span></label>`}
       <label class="chk"><input type="checkbox" name="seq" ${c.sequential ? 'checked' : ''}> <span>Διαδοχικά μαθήματα: κάθε μάθημα ξεκλειδώνει όταν ολοκληρωθεί το προηγούμενο</span></label>
       <label class="chk"><input type="checkbox" name="arch" ${c.archived ? 'checked' : ''}> <span>Αρχειοθετημένο (οι χρήστες δεν έχουν πλέον πρόσβαση· εσείς κρατάτε όλο το υλικό)</span></label>
       <div><button class="btn primary">Αποθήκευση</button></div></form></div>
@@ -1362,7 +1578,7 @@ async function tabSettings(c) {
     bind: () => {
       $('#fs').onsubmit = async e => {
         e.preventDefault(); const f = e.target;
-        try { await q(sb.from('classes').update({ name: f.elements.namedItem('name').value.trim(), description: f.desc.value.trim(), is_open: f.open.checked, sequential: f.seq.checked, archived: f.arch.checked }).eq('id', c.id)); toast('Αποθηκεύτηκε.'); render(); }
+        try { await q(sb.from('classes').update({ name: f.elements.namedItem('name').value.trim(), description: f.desc.value.trim(), is_open: f.open ? f.open.checked : false, sequential: f.seq.checked, archived: f.arch.checked }).eq('id', c.id)); toast('Αποθηκεύτηκε.'); render(); }
         catch (er) { toast(errText(er), true); }
       };
       $('#fdup').onsubmit = async e => {
@@ -1460,7 +1676,7 @@ route(/^\/c\/([\w-]{36})\/lesson\/([\w-]{36})(\/edit)?$/, async (cid, lid, edit,
   const [c, l, mats, as] = await Promise.all([loadClass(cid),
     q(sb.from('lessons').select('*').eq('id', lid).maybeSingle()),
     q(sb.from('materials').select('*').eq('item_id', lid).order('created_at')),
-    F.assignments ? q(sb.from('assignments').select('id,title,due_at,published').eq('lesson_id', lid)) : none()]);
+    featOn('assignments', cid) ? q(sb.from('assignments').select('id,title,due_at,published').eq('lesson_id', lid)) : none()]);
   if (stale(tok)) return;
   if (!l || (!c.mine && !l.published)) throw new Error('Το μάθημα δεν βρέθηκε.');
   if (edit && c.mine) return lessonEdit(c, l, mats);
@@ -1600,7 +1816,7 @@ const quizHelp = () => `<div class="panel small"><h3>Παράδειγμα ερω
 // ================================================================ ΕΡΓΑΣΙΑ
 route(/^\/c\/([\w-]{36})\/asg\/([\w-]{36})(?:\/(edit|grade))?(?:\/([\w-]{36}))?$/, async (cid, aid, mode, sid, tok) => {
   if (needLogin()) return;
-  if (!F.assignments) return go('#/c/' + cid);
+  if (!featOn('assignments', cid)) return go('#/c/' + cid);
   const [c, a, mats] = await Promise.all([loadClass(cid),
     q(sb.from('assignments').select('*, lessons(id,title)').eq('id', aid).maybeSingle()),
     q(sb.from('materials').select('*').eq('item_id', aid).order('created_at'))]);
@@ -1773,7 +1989,7 @@ async function asgGrade(c, a, subId, tok) {
 // ================================================================ ΜΗΝΥΜΑΤΑ
 route(/^\/c\/([\w-]{36})\/chat(?:\/([\w-]{36}))?$/, async (cid, sid, tok) => {
   if (needLogin()) return;
-  if (!F.messages) return go('#/c/' + cid);
+  if (!featOn('messages', cid)) return go('#/c/' + cid);
   const c = await loadClass(cid); if (stale(tok)) return;
   if (!c.mine) sid = me.id;
   if (c.mine && !sid) {
@@ -1881,8 +2097,9 @@ function bindChart() {
 route(/^\/(?:admin|me\/stats)$/, async tok => {
   if (needLogin()) return;
   if (!isTeacher()) return go('#/');
-  const [o, intr, gone] = await Promise.all([q(sb.rpc('admin_overview')), sb.rpc('admin_interest').then(r => r.error ? null : (r.data || []), () => null),
-    sb.rpc('admin_accounts').then(r => r.error ? null : (r.data || []), () => null)]);
+  const A = isAdmin();
+  const [o, intr, gone] = await Promise.all([q(sb.rpc('admin_overview')), A ? sb.rpc('admin_interest').then(r => r.error ? null : (r.data || []), () => null) : none(),
+    A ? sb.rpc('admin_accounts').then(r => r.error ? null : (r.data || []), () => null) : none()]);
   if (stale(tok)) return;
   const k = o.kpi, del = o.deleted || {};
   // ενδιαφέρον για μαθήματα που έρχονται (catalog.js): ομαδοποίηση ανά μάθημα
@@ -1911,15 +2128,15 @@ route(/^\/(?:admin|me\/stats)$/, async tok => {
   <div class="panel"><h2>Ανά μάθημα</h2><p class="muted small" style="margin:0 0 6px">Πατήστε στον τίτλο μιας στήλης για ταξινόμηση.</p><div class="tablewrap"><table class="t" id="lt"><thead><tr><th>Μάθημα</th><th>Ενότητα</th><th class="n">Προβολές</th><th class="n">Μοναδικοί</th><th class="n">Ολοκληρώσεις</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody>
     ${o.lessons.map(l => `<tr><td>${esc(l.title)}</td><td class="muted">${esc(l.class_name)}</td><td class="n">${l.views}</td><td class="n">${l.viewers}</td><td class="n">${l.completions}</td><td class="n">${l.downloads}</td><td class="n">${l.videos}</td><td class="n">${l.sims}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Δεν υπάρχουν δημοσιευμένα μαθήματα.</td></tr>'}
   </tbody></table></div></div>
-  <div class="panel"><div class="row between"><h2 style="margin:0">🔔 Ενδιαφέρον για μαθήματα που έρχονται</h2>${cKeys.length ? '<button class="btn small" id="csvi">Λήψη (CSV)</button>' : ''}</div>
-    <p class="muted small" style="margin:4px 0 8px">Ποιοι πάτησαν «Ενημέρωσέ με όταν ανοίξει». Όταν ανοίξει το μάθημα, στείλτε τους email με τους παραλήπτες σε Bcc.</p>${intrHTML}</div>
+  ${A ? `  <div class="panel"><div class="row between"><h2 style="margin:0">🔔 Ενδιαφέρον για μαθήματα που έρχονται</h2>${cKeys.length ? '<button class="btn small" id="csvi">Λήψη (CSV)</button>' : ''}</div>
+    <p class="muted small" style="margin:4px 0 8px">Ποιοι πάτησαν «Ενημέρωσέ με όταν ανοίξει». Όταν ανοίξει το μάθημα, στείλτε τους email με τους παραλήπτες σε Bcc.</p>${intrHTML}</div>` : ''}
   <div class="panel"><div class="row between"><h2 style="margin:0">Χρήστες (${o.people.length})${goneN ? ` <span class="muted small">· ${goneN} διαγραμμένοι</span>` : ''}</h2><input class="inp" id="uq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:280px"></div>
   <div class="tablewrap" style="margin-top:10px"><table class="t" id="pt"><thead><tr><th>Όνομα</th><th>Email</th><th data-d="1">Εγγραφή</th><th data-d="1">Διαγραφή</th><th data-d="1">Τελευταία δραστηριότητα</th><th class="n">Ολοκλ.</th><th class="n">Αρχεία</th><th class="n">Βίντεο</th><th class="n">Προσομ.</th></tr></thead><tbody id="ub">
     ${o.people.map(p => `<tr class="click" data-u="${p.id}" data-s="${esc((p.full_name + ' ' + p.email).toLowerCase())}"><td>${esc(p.full_name)}</td><td class="muted">${esc(p.email)}</td><td data-v="${esc(p.created_at || '')}">${fmtDay(p.created_at)}</td><td data-v="" class="muted">—</td><td data-v="${esc(p.last_activity || '')}">${relDay(p.last_activity)}</td><td class="n">${p.completions}</td><td class="n">${p.downloads}</td><td class="n">${p.videos}</td><td class="n">${p.sims}</td></tr>`).join('')}
     ${(gone || []).map(g => `<tr class="deleted" data-s=""><td style="white-space:nowrap"><i>Διαγραμμένος λογαριασμός</i></td><td class="muted">—</td><td data-v="${esc(g.signed_up_at || '')}">${fmtDay(g.signed_up_at)}</td><td data-v="${esc(g.deleted_at || '')}">${fmtDay(g.deleted_at)}</td><td data-v="" class="muted">—</td><td colspan="4"></td></tr>`).join('')}
     ${delAny ? `<tr class="click deleted" data-u="deleted" data-s=""><td colspan="5"><i>Διαγραμμένοι χρήστες (ανώνυμα)</i></td><td class="n">${del.completions}</td><td class="n">${del.downloads}</td><td class="n">${del.videos}</td><td class="n">${del.sims}</td></tr>` : ''}
   </tbody></table></div>
-  <p class="muted small">Τα «βίντεο» μετρούν τα κλικ για άνοιγμα στο YouTube, όχι τον χρόνο παρακολούθησης. Όταν ένας χρήστης διαγράφει τον λογαριασμό του, η δραστηριότητά του παραμένει μόνο ανώνυμα στα σύνολα· κρατιούνται μόνο οι ημερομηνίες εγγραφής και διαγραφής, χωρίς όνομα ή email.${gone === null ? ' Για να εμφανίζονται οι διαγραφές, τρέξτε το <code>update_10_account_log.sql</code> στο Supabase (SQL Editor).' : ''}</p></div>`);
+  <p class="muted small">Τα «βίντεο» μετρούν τα κλικ για άνοιγμα στο YouTube, όχι τον χρόνο παρακολούθησης. Όταν ένας χρήστης διαγράφει τον λογαριασμό του, η δραστηριότητά του παραμένει μόνο ανώνυμα στα σύνολα· κρατιούνται μόνο οι ημερομηνίες εγγραφής και διαγραφής, χωρίς όνομα ή email.${A && gone === null ? ' Για να εμφανίζονται οι διαγραφές, τρέξτε το <code>update_10_account_log.sql</code> στο Supabase (SQL Editor).' : ''}</p></div>`);
   bindChart();
   sortable($('#lt')); sortable($('#pt'));
   $$('#ub tr.click').forEach(r => r.onclick = () => go('#/admin/u/' + r.dataset.u));

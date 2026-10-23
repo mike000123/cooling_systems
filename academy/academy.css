@@ -386,3 +386,25 @@ body.viewing{overflow:hidden}
 .tg .tother{grid-area:3/1/4/4;min-width:0}
 @media (max-width:1100px){.mewrap.tg{grid-template-columns:minmax(0,1fr)}.tg .side,.tg .thero,.tg .tacts,.tg .tmain,.tg .tside,.tg .tother{grid-area:auto}
   .tg .side{position:static}.tg .tacts{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.tg .tside{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}}
+
+/* ---------- ρόλοι & πακέτα εκπαιδευτών (update_15) ---------- */
+.ubar{height:6px;border-radius:9px;background:#E3EAF0;overflow:hidden;width:60px;display:inline-block;vertical-align:middle;margin-left:6px}
+.ubar i{display:block;height:100%;background:var(--navy)}.ubar.warn i{background:#E2A12B}.ubar.full i{background:#C8442F}
+.planbar{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;margin-bottom:12px}
+.plans{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.plan{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.plan.hl{border-color:var(--orange);box-shadow:0 0 0 2px rgba(226,103,43,.12)}
+.plan h3{margin:0;font-size:18px}.plan .price{font-size:20px;font-weight:800;color:var(--navy)}
+.plan ul{margin:0;padding:0;list-style:none;display:grid;gap:5px;font-size:13.5px}.plan li.no{color:var(--muted)}
+.kv{display:grid;grid-template-columns:170px minmax(0,1fr);gap:10px 14px;align-items:center}
+.kv[hidden],[data-for][hidden]{display:none}
+.sel{border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:#fff;font:inherit;font-size:14px;max-width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{padding:3px 9px;border-radius:999px;background:var(--soft);border:1px solid var(--line-2);font-size:12px;font-weight:600}
+.chip.on{background:#E8F4FA;border-color:#C3E0EE;color:#174E68}
+.note{border-left:3px solid var(--orange);padding:6px 10px;background:#FFF8F1;border-radius:6px;font-size:13px}
+.tile.lock{opacity:.6}.tile.lock span::after{content:" 🔒"}
+.mbg{position:fixed;inset:0;background:rgba(15,30,45,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;z-index:80;overflow:auto}
+.modal{background:#fff;border-radius:16px;width:min(720px,100%);padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.cpick{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px}
+.cpick details{margin:4px 0}.cpick .chk{display:flex;margin:3px 0 3px 10px}
+@media (max-width:720px){.kv{grid-template-columns:minmax(0,1fr)}}
