@@ -781,20 +781,21 @@ function meLayout(on, inner, cls) {
   const T = isTeacher() && !homePreview(), first = (me.full_name || '?').split(' ')[0];
   const items = [['dash', '#/me', '🏠', 'Ο πίνακάς μου']].concat(T ? [['stats', '#/me/stats', '📊', 'Στατιστικά']] : [],
     T && isAdmin() ? [['teach', '#/me/teachers', '👥', 'Εκπαιδευτές'], ['plans', '#/me/plans', '📦', 'Πακέτα']] : [], [['set', '#/me/settings', '⚙️', 'Ρυθμίσεις']]);
-  const sub = T ? (ROLE_NAME[me.role] || 'Εκπαιδευτής') + (isExt() && MT && MT.plan ? ' · ' + MT.plan.name : '') : 'Σπουδαστής';
+  const sub = T ? (ROLE_NAME[me.role] || 'Εκπαιδευτής') + (isExt() && MT && MT.plan ? ' · ' + MT.plan.name : '') : homePreview() ? '👁 Προβολή ως σπουδαστής' : 'Σπουδαστής';
   return `<div class="mewrap${cls ? ' ' + cls : ''}"><aside class="side" aria-label="Ο λογαριασμός μου"><div class="who"><span class="av">${esc(first[0].toUpperCase())}</span><div><b>${esc(first)}</b><small>${esc(sub)}</small></div></div>
     ${items.map(([k, h, i, t]) => `<a class="${k === on ? 'on' : ''}" href="${h}"${k === on ? ' aria-current="page"' : ''}>${i} ${t}</a>`).join('')}</aside><div class="mebody">${inner}</div></div>`;
 }
-const pvBanner = () => homePreview() ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε όπως ένας χρήστης (μόνο ανοιχτές ενότητες, χωρίς πρόχειρα). Η πρόοδος είναι η δική σας.</span><span class="row"><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : '';
+const pvBanner = () => homePreview() ? `<div class="msg warn row between" style="margin-bottom:12px"><span>👁 <b>Προβολή ως χρήστης</b> — βλέπετε τον πίνακα όπως τον βλέπει ένας σπουδαστής${isExt() ? ' (τα ανοιχτά μαθήματα της Academy και τα τμήματά σας)' : ' (μόνο ανοιχτές ενότητες)'}, χωρίς πρόχειρα. Η πρόοδος είναι η δική σας. Για να επιστρέψετε στον πίνακα καθηγητή πατήστε «Έξοδος προβολής».</span><span class="row"><button class="btn small" id="prev-exit">Έξοδος προβολής</button></span></div>` : '';
 // δεδομένα σπουδαστή: ενότητες, πρόοδος, δηλώσεις, «συνέχισε»
 async function studentBase() {
   await loadCatStatus();
   const [lessons, myProg, classes, mine] = await Promise.all([
     q(sb.from('lessons').select('id,class_id,title,position').eq('published', true)),
     q(sb.from('lesson_progress').select('lesson_id,class_id,completed_at').eq('user_id', me.id)),
-    q(sb.from('classes').select('id,name,description,is_open,archived').order('created_at')),
+    q(sb.from('classes').select('id,name,description,is_open,archived,owner').order('created_at')),
     myInterests()]);
-  if (homePreview()) classes.splice(0, classes.length, ...classes.filter(c => c.is_open && !c.archived));
+  // προβολή ως σπουδαστής: ό,τι βλέπει ένας σπουδαστής — τα ανοιχτά μαθήματα και (για τον εξωτερικό εκπαιδευτή) τα δικά του τμήματα, όπως τα βλέπουν οι σπουδαστές του
+  if (homePreview()) classes.splice(0, classes.length, ...classes.filter(c => !c.archived && (c.is_open || (isExt() && c.owner === me.id))));
   const tot = {}, dn = {}; lessons.forEach(l => tot[l.class_id] = (tot[l.class_id] || 0) + 1);
   const pubIds = new Set(lessons.map(l => l.id)); myProg.filter(p => pubIds.has(p.lesson_id)).forEach(p => dn[p.class_id] = (dn[p.class_id] || 0) + 1);
   const prog = {}; classes.forEach(c => prog[c.id] = { d: dn[c.id] || 0, t: tot[c.id] || 0 });
@@ -921,6 +922,12 @@ function landingHTML(catHTML, who) {
 
 // κοινή κεφαλίδα «Ο πίνακάς μου» για όλους τους λογαριασμούς (ίδια δομή: hero · ενέργειες · κύριο · πλαϊνή σύνοψη)
 const heroHTML = (badge, lead, bullets) => `<div class="thero" style="background-image:url(img/hero_teacher_bg.jpg)"><div class="thtxt"><div class="thbrand"><span>❄</span> Cooling Systems Lab Academy</div><h1 class="thbadge">${badge}</h1><p class="thhi">Καλώς ήρθες ξανά, <b>${esc((me.full_name || '').split(' ')[0])}</b>!</p><p class="thlead">${lead}</p><ul class="thul">${bullets.map(b => `<li>${b}</li>`).join('')}</ul></div></div>`;
+// κεφαλίδα του πίνακα σπουδαστή (ίδιο ύφος με του καθηγητή, με την εικόνα εκπαιδευτή–σπουδαστή)· οι γραμμές δείχνουν μόνο ό,τι υπάρχει για τον λογαριασμό
+const studentHero = () => {
+  const bl = ['Τα μαθήματά σου ανά επίπεδο, με την πρόοδό σου', 'Συνέχεια από εκεί που σταμάτησες', 'Βίντεο, προσομοιώσεις και αυτοέλεγχος']
+    .concat(featAny('assignments') ? ['Εργασίες και ανατροφοδότηση'] : [], featAny('messages') ? ['Μηνύματα με τον εκπαιδευτή σου'] : []);
+  return `<div class="thero sthero"><div class="thtxt"><div class="thbrand"><span>❄</span> Cooling Systems Lab Academy</div><h1 class="thbadge">Πίνακας σπουδαστή</h1><p class="thhi">Καλώς ήρθες ξανά, <b>${esc((me.full_name || '').split(' ')[0])}</b>!</p><p class="thlead">Όλα όσα χρειάζεσαι για να μάθεις με τον δικό σου ρυθμό, σε ένα σημείο.</p><ul class="thul">${bl.map(b => `<li>${b}</li>`).join('')}</ul></div><div class="stimg" role="img" aria-label="Εκπαιδευτής και σπουδαστής μπροστά σε ψυκτική μονάδα" style="background-image:url(img/hero_photo.jpg)"></div></div>`;
+};
 async function studentHome(tok) {
   const [D, asgs, subs, anns] = await Promise.all([studentBase(),
     featAny('assignments') ? q(sb.from('assignments').select('id,title,due_at,class_id,allow_late,classes(name)').order('due_at', { ascending: true, nullsFirst: false })) : none(),
@@ -944,7 +951,7 @@ async function studentHome(tok) {
     featAny('announcements') ? `<div class="panel"><h2>Ανακοινώσεις</h2>
       ${anns.length ? `<ul class="list">${anns.map(a => `<li><a class="item" href="#/c/${a.class_id}/ann"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')} · ${fmtDay(a.created_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Καμία ανακοίνωση.</p>`}
     </div>` : ''].filter(Boolean);
-  app.innerHTML = meLayout('dash', `${pvBanner()}<h1 style="margin-top:0">Ο πίνακάς μου</h1>
+  app.innerHTML = meLayout('dash', `${pvBanner()}${studentHero()}
   ${resume}
   ${panels.length ? `<div class="${panels.length > 1 ? 'two' : ''}">${panels.join('')}</div>` : ''}
   ${catHTML}

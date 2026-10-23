@@ -408,3 +408,9 @@ body.viewing{overflow:hidden}
 .cpick{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px}
 .cpick details{margin:4px 0}.cpick .chk{display:flex;margin:3px 0 3px 10px}
 @media (max-width:720px){.kv{grid-template-columns:minmax(0,1fr)}}
+/* κεφαλίδα πίνακα σπουδαστή */
+.sthero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);aspect-ratio:auto;min-height:0;margin-bottom:14px;background:linear-gradient(90deg,#eef4fb 0%,#e6f0fa 100%)}
+.sthero .thtxt{width:auto;height:auto}
+.sthero .stimg{background-size:cover;background-position:center 30%;min-height:240px;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 22%);mask-image:linear-gradient(90deg,transparent 0,#000 22%)}
+@media (max-width:700px){.sthero{grid-template-columns:minmax(0,1fr)}.sthero .stimg{order:-1;min-height:170px;-webkit-mask-image:none;mask-image:none}.sthero .thtxt{background:none}}
+
