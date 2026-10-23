@@ -919,6 +919,8 @@ function landingHTML(catHTML, who) {
 </div>`;
 }
 
+// κοινή κεφαλίδα «Ο πίνακάς μου» για όλους τους λογαριασμούς (ίδια δομή: hero · ενέργειες · κύριο · πλαϊνή σύνοψη)
+const heroHTML = (badge, lead, bullets) => `<div class="thero" style="background-image:url(img/hero_teacher_bg.jpg)"><div class="thtxt"><div class="thbrand"><span>❄</span> Cooling Systems Lab Academy</div><h1 class="thbadge">${badge}</h1><p class="thhi">Καλώς ήρθες ξανά, <b>${esc((me.full_name || '').split(' ')[0])}</b>!</p><p class="thlead">${lead}</p><ul class="thul">${bullets.map(b => `<li>${b}</li>`).join('')}</ul></div></div>`;
 async function studentHome(tok) {
   const [D, asgs, subs, anns] = await Promise.all([studentBase(),
     featAny('assignments') ? q(sb.from('assignments').select('id,title,due_at,class_id,allow_late,classes(name)').order('due_at', { ascending: true, nullsFirst: false })) : none(),
@@ -970,6 +972,10 @@ function duePill(a, sub) {
   return `<span class="pill ${days < 3 ? 'warn' : ''}">Έως ${fmtDate(d)}</span>`;
 }
 
+// ίδια κεφαλίδα για όλους τους εκπαιδευτές· οι γραμμές δείχνουν μόνο ό,τι επιτρέπει ο λογαριασμός
+const teachBullets = () => isAdmin() ? ['Διαχείριση περιεχομένου και εργασιών', 'Παρακολούθηση προόδου και αξιολογήσεων', 'Επικοινωνία με μαθητές', 'Αναλυτικά στατιστικά και αναφορές']
+  : ['Διαχείριση περιεχομένου' + (featAny('assignments') ? ' και εργασιών' : ' και υλικού'), 'Παρακολούθηση προόδου' + (featAny('assignments') ? ' και αξιολογήσεων' : ' των σπουδαστών')]
+    .concat(featAny('messages') ? ['Επικοινωνία με μαθητές'] : [], ['Αναλυτικά στατιστικά για τα δικά σου μαθήματα']);
 async function teacherHome(tok) {
   if (isExt()) return extHome(tok);
   const myKeys = isStaff() && MT ? (MT.courses || []) : [];
@@ -1001,7 +1007,7 @@ async function teacherHome(tok) {
   </div>` : ''].filter(Boolean);
   const acts = `<div class="tacts"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button>${isAdmin() ? '<a class="btn accent" href="#/new-class" title="Για κλειστά τμήματα ή υλικό που δεν ανήκει σε κάρτα του καταλόγου">+ Ενότητα εκτός καταλόγου</a>' : ''}</div>`;
   const staffNote = (isStaff() ? `<div class="msg info small" style="margin:0 0 12px">👥 <b>Εκπαιδευτής Academy:</b> επεξεργάζεστε τα μαθήματα του καταλόγου που σας έχουν ανατεθεί (${myKeys.length ? myKeys.map(k => { const m = catOf(null, k); return esc(m ? m.c.name : k); }).join(', ') : 'κανένα ακόμη'}). Τα υπόλοιπα τα βλέπετε όπως οι χρήστες.</div>` : '');
-  app.innerHTML = meLayout('dash', `<div class="thero" style="background-image:url(img/hero_teacher_bg.jpg)"><div class="thtxt"><div class="thbrand"><span>❄</span> Cooling Systems Lab Academy</div><h1 class="thbadge">Πίνακας καθηγητή</h1><p class="thhi">Καλώς ήρθες ξανά, <b>${esc((me.full_name || '').split(' ')[0])}</b>!</p><p class="thlead">Όλα τα εργαλεία που χρειάζεσαι για να οργανώσεις και να υποστηρίξεις τα μαθήματά σου.</p><ul class="thul"><li>Διαχείριση περιεχομένου και εργασιών</li><li>Παρακολούθηση προόδου και αξιολογήσεων</li><li>Επικοινωνία με μαθητές</li><li>Αναλυτικά στατιστικά και αναφορές</li></ul></div></div>${acts}
+  app.innerHTML = meLayout('dash', `${heroHTML('Πίνακας καθηγητή', 'Όλα τα εργαλεία που χρειάζεσαι για να οργανώσεις και να υποστηρίξεις τα μαθήματά σου.', teachBullets())}${acts}
   <div class="tmain">${catHTML || (classes.length ? classCards(classes) : '<div class="empty">Δεν έχετε ενότητες ακόμη.</div>')}</div>
   <aside class="tside" aria-label="Σύνοψη">${staffNote}${tiles}${panels.join('')}</aside>
   ${otherHTML ? `<div class="tother">${otherHTML}</div>` : ''}`, 'tg');
@@ -1043,14 +1049,13 @@ async function extHome(tok) {
   const cards = classes.map(c => `<div class="ccard open tcl" data-href="#/c/${esc(c.id)}"><div class="row" style="gap:6px"><span class="pill ok">Ιδιωτικό · κωδικός ${esc(c.join_code)}</span>${c.archived ? '<span class="pill">Αρχειοθετημένο</span>' : ''}</div>
       <h3>${esc(c.name)}</h3><p class="muted small cdesc">${esc(c.description || '')}</p><p class="small muted tstat">📚 ${pub[c.id] || 0} δημοσιευμένα · ${(all[c.id] || 0) - (pub[c.id] || 0)} πρόχειρα · 👥 ${cnt[c.id] || 0} σπουδαστές</p>
       <div class="ccact"><a class="btn accent small" href="#/c/${esc(c.id)}">Μαθήματα →</a>${t.active ? `<button class="btn small newl" data-c="${esc(c.id)}">+ Νέο μάθημα</button>` : ''}</div></div>`).join('');
-  app.innerHTML = meLayout('dash', `${planBanner()}
-    <div class="row between" style="margin:6px 0 4px"><h1 style="margin:0">Ο πίνακάς μου</h1><span class="row"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button>${newBtn}</span></div>
-    ${tiles}${unreadHTML}
-    <div class="panel"><h2 style="margin-top:0">Τα τμήματά μου</h2>
+  const acts = `<div class="tacts"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button>${newBtn.replace('class="btn accent"', 'class="btn accent"')}</div>`;
+  const classesPanel = `<div class="panel"><h2 style="margin-top:0">Τα τμήματά μου</h2>
       ${classes.length ? `<div class="rail" style="flex-wrap:wrap;overflow:visible">${cards}</div>` : `<div class="empty">Δεν έχετε τμήματα ακόμη. ${canNew ? 'Φτιάξτε το πρώτο με «＋ Νέο τμήμα» και δώστε τον κωδικό του στους σπουδαστές σας.' : ''}</div>`}
-      <p class="muted small" style="margin:10px 0 0">${canCopyAcademy() ? '🎓 Μέσα σε κάθε τμήμα, το «Εισαγωγή από άλλη ενότητα» σας αφήνει να αντιγράψετε έτοιμα μαθήματα της Academy.' : '🔒 Η αντιγραφή έτοιμων μαθημάτων της Academy στα τμήματά σας περιλαμβάνεται σε άλλο πακέτο.'}</p></div>
-    <p class="catkick" style="margin-top:18px">Τα μαθήματα της Academy — ανοιχτά και για εσάς, όπως για κάθε χρήστη</p>
-    ${catHTML}`);
+      <p class="muted small" style="margin:10px 0 0">${canCopyAcademy() ? '🎓 Μέσα σε κάθε τμήμα, το «Εισαγωγή από άλλη ενότητα» σας αφήνει να αντιγράψετε έτοιμα μαθήματα της Academy.' : '🔒 Η αντιγραφή έτοιμων μαθημάτων της Academy στα τμήματά σας περιλαμβάνεται σε άλλο πακέτο.'}</p></div>`;
+  app.innerHTML = meLayout('dash', `${heroHTML('Πίνακας καθηγητή', 'Όλα τα εργαλεία που χρειάζεσαι για να οργανώσεις και να υποστηρίξεις τα μαθήματά σου.', teachBullets())}${acts}
+    <div class="tmain">${planBanner()}${classesPanel}<p class="catkick" style="margin-top:18px">Τα μαθήματα της Academy — ανοιχτά και για εσάς, όπως για κάθε χρήστη</p>${catHTML}</div>
+    <aside class="tside" aria-label="Σύνοψη">${tiles}${unreadHTML}</aside>`, 'tg');
   bindCatalog();
   $$('.panel .ccard.tcl[data-href]').forEach(el => { if (!el.closest('#catalog')) el.onclick = e => { if (!e.target.closest('a,button')) go(el.dataset.href); }; });
   $$('.panel button.newl').forEach(b => { if (!b.closest('#catalog')) b.onclick = () => newLesson(b.dataset.c); });
