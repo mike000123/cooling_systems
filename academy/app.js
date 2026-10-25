@@ -1268,7 +1268,7 @@ let examLibP = null;
 function loadExamLib() {
   const one = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => { s.remove(); rej(new Error(src)); }; document.head.appendChild(s); });
   return examLibP || (examLibP = (window.JSZip ? Promise.resolve() : one('vendor/jszip.min.js').catch(() => one('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js')))
-    .then(() => window.ExamGen ? null : one('examgen.js?v=2'))
+    .then(() => window.ExamGen ? null : one('examgen.js?v=3'))
     .catch(() => { examLibP = null; throw new Error('Δεν φορτώθηκε η γεννήτρια διαγωνισμάτων. Ελέγξτε τη σύνδεση και δοκιμάστε ξανά.'); }));
 }
 const EXAM_PREFS = 'csl-exam-fields';
@@ -1348,7 +1348,7 @@ route(/^\/me\/exams(?:\/([a-z0-9_-]{1,40}))?$/, async (bid, tok) => {
     <div class="panel row between"><span class="muted small" id="exwarn"></span><span class="row"><button class="btn primary" id="exgo">📄 Δημιουργία διαγωνίσματος + λύσεων</button></span></div>
     <div class="panel"><h2>📊 Παρουσίαση ανακεφαλαίωσης</h2>
       <p class="muted small" style="margin-top:-4px">PowerPoint με τη θεωρία του μαθήματος και, σε κάθε ενότητα, διαφάνειες εκφώνησης και λύσης για τα θέματα που επιλέξατε πιο πάνω.</p>
-      <div class="exmodes"><label class="chk"><input type="radio" name="rmode" value="before" checked> <span><b>Πριν το διαγώνισμα</b><br><small class="muted">παρόμοια θέματα: για κάθε θέση μια άλλη παραλλαγή, ίδιου τύπου με άλλα δεδομένα, ώστε οι σπουδαστές να μη δουν τα θέματα της εξέτασης</small></span></label>
+      <div class="exmodes"><label class="chk"><input type="radio" name="rmode" value="before" checked> <span><b>Πριν το διαγώνισμα</b><br><small class="muted">παρόμοια θέματα: για κάθε θέση μια άλλη παραλλαγή, ίδιου τύπου με άλλα δεδομένα, ώστε οι σπουδαστές να μη δουν τα θέματα της εξέτασης· μαζί κατεβαίνει και αναφορά Word (μόνο για εσάς) με την αντιστοιχία κάθε θέματος του διαγωνίσματος με τις διαφάνειες της παρουσίασης</small></span></label>
       <label class="chk"><input type="radio" name="rmode" value="after"> <span><b>Μετά το διαγώνισμα</b><br><small class="muted">τα ίδια τα θέματα του διαγωνίσματος με τις λύσεις τους, για συζήτηση στην τάξη</small></span></label></div>
       <div class="row" style="margin-top:10px"><button type="button" class="btn" id="exrec">📊 Δημιουργία παρουσίασης</button></div></div></form>`);
   const showSel = el => {
@@ -1415,9 +1415,14 @@ route(/^\/me\/exams(?:\/([a-z0-9_-]{1,40}))?$/, async (bid, tok) => {
       try { [recap, tpl] = await Promise.all([examFile(bid, 'recap.json', 'json'), examFile(bid, 'recap.pptx')]); }
       catch (er) { throw new Error('Η παρουσίαση ανακεφαλαίωσης δεν είναι ακόμη διαθέσιμη για αυτό το μάθημα.'); }
       const zip = await ExamGen.buildRecap(JSZip, { template: tpl, recap, bank, ids, mode, fields });
-      saveBlob(await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', compression: 'DEFLATE' }),
-        `Ανακεφαλαίωση_${fileBase(fields)}${mode === 'after' ? '_λύσεις_διαγωνίσματος' : ''}.pptx`);
-      toast('Η παρουσίαση κατέβηκε.');
+      const pname = `Ανακεφαλαίωση_${fileBase(fields)}${mode === 'after' ? '_λύσεις_διαγωνίσματος' : ''}.pptx`;
+      saveBlob(await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', compression: 'DEFLATE' }), pname);
+      if (mode === 'before') {
+        await new Promise(r => setTimeout(r, 400));
+        const rz = await ExamGen.buildReport(JSZip, { map: zip.recapMap, nSlides: zip.recapSlides, bank, recap, fields, mode, files: { exam: fileBase(fields) + '.docx', recap: pname } });
+        saveBlob(await rz.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' }), `Αντιστοιχία_θεμάτων_${fileBase(fields)}.docx`);
+      }
+      toast(mode === 'before' ? 'Κατέβηκαν η παρουσίαση και η αναφορά αντιστοιχίας (Word).' : 'Η παρουσίαση κατέβηκε.');
     } catch (er) { toast(errText(er), true); }
     finally { btn.disabled = false; btn.textContent = '📊 Δημιουργία παρουσίασης'; }
   };
