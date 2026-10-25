@@ -449,3 +449,5 @@ a.plan.exbank{color:inherit;text-decoration:none}a.plan.exbank:hover{border-colo
 .exslot .exn{font-weight:800;color:var(--navy);text-align:center;padding-top:6px}
 .exsel{display:grid;gap:4px;min-width:0}.exsel select{width:100%}.exsel small{line-height:1.35}
 @media (max-width:640px){.kv{grid-template-columns:1fr}.exslot{grid-template-columns:24px minmax(0,1fr) auto}}
+.exmodes{display:grid;gap:8px}.exmodes .chk{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.exmodes .chk input{margin-top:4px}

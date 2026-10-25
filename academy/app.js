@@ -1268,7 +1268,7 @@ let examLibP = null;
 function loadExamLib() {
   const one = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => { s.remove(); rej(new Error(src)); }; document.head.appendChild(s); });
   return examLibP || (examLibP = (window.JSZip ? Promise.resolve() : one('vendor/jszip.min.js').catch(() => one('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js')))
-    .then(() => window.ExamGen ? null : one('examgen.js?v=1'))
+    .then(() => window.ExamGen ? null : one('examgen.js?v=2'))
     .catch(() => { examLibP = null; throw new Error('Δεν φορτώθηκε η γεννήτρια διαγωνισμάτων. Ελέγξτε τη σύνδεση και δοκιμάστε ξανά.'); }));
 }
 const EXAM_PREFS = 'csl-exam-fields';
@@ -1295,9 +1295,9 @@ route(/^\/me\/exams(?:\/([a-z0-9_-]{1,40}))?$/, async (bid, tok) => {
   catch (er) { return needUpd15('exams', '📝 Τράπεζα θεμάτων', 'update_17_exam_bank.sql'); }
   if (stale(tok)) return;
   const adminBox = isAdmin() ? `<details class="panel small" style="margin-top:14px"><summary><b>Διαχείριση: ανέβασμα αρχείων τράπεζας</b></summary>
-    <p class="muted small">Για κάθε τράπεζα ανεβαίνουν 3 αρχεία που φτιάχνει το build.py: <code>bank.json</code>, <code>exam.docx</code>, <code>sol.docx</code>. Αποθηκεύονται ιδιωτικά (bucket exam-bank).</p>
+    <p class="muted small">Για κάθε τράπεζα ανεβαίνουν τα αρχεία που φτιάχνουν τα build.py / build_recap.py: <code>bank.json</code>, <code>exam.docx</code>, <code>sol.docx</code> και (για την ανακεφαλαίωση) <code>recap.json</code>, <code>recap.pptx</code>. Αποθηκεύονται ιδιωτικά (bucket exam-bank).</p>
     <div class="row"><select class="sel" id="upb">${banks.map(b => `<option value="${esc(b.id)}">${esc(b.title)}</option>`).join('')}</select>
-    <input type="file" id="upf" multiple accept=".json,.docx"><button class="btn small" id="upgo">Ανέβασμα</button></div></details>` : '';
+    <input type="file" id="upf" multiple accept=".json,.docx,.pptx"><button class="btn small" id="upgo">Ανέβασμα</button></div></details>` : '';
   if (!bid) {
     app.innerHTML = meLayout('exams', `<h1 style="margin-top:0">📝 Τράπεζα θεμάτων</h1>
       <p class="muted" style="margin-top:-6px">Διαλέξτε μάθημα. Για κάθε θέση του διαγωνίσματος επιλέγετε θέμα (ή «🎲 Τυχαία επιλογή») και κατεβάζετε έτοιμο Word με το αρχείο λύσεων.</p>
@@ -1345,7 +1345,12 @@ route(/^\/me\/exams(?:\/([a-z0-9_-]{1,40}))?$/, async (bid, tok) => {
       ${fld('TITLE', 'Τίτλος')}${fld('PROGRAM', 'Πρόγραμμα σπουδών')}${fld('COURSE', 'Μάθημα')}${fld('TEACHER', 'Διδάσκων/ουσα')}${fld('DATE', 'Ημερομηνία και ώρα', 'π.χ. 12/11/2026, 09:00–10:30')}
     </div></div>
     ${['A', 'B'].map(part => `<div class="panel"><h2>${PART[part]} (${bank.parts[part]})</h2><div class="exslots">${pick[part].map((_, i) => slot(part, i)).join('')}</div></div>`).join('')}
-    <div class="panel row between"><span class="muted small" id="exwarn"></span><span class="row"><button class="btn primary" id="exgo">📄 Δημιουργία διαγωνίσματος + λύσεων</button></span></div></form>`);
+    <div class="panel row between"><span class="muted small" id="exwarn"></span><span class="row"><button class="btn primary" id="exgo">📄 Δημιουργία διαγωνίσματος + λύσεων</button></span></div>
+    <div class="panel"><h2>📊 Παρουσίαση ανακεφαλαίωσης</h2>
+      <p class="muted small" style="margin-top:-4px">PowerPoint με τη θεωρία του μαθήματος και, σε κάθε ενότητα, διαφάνειες εκφώνησης και λύσης για τα θέματα που επιλέξατε πιο πάνω.</p>
+      <div class="exmodes"><label class="chk"><input type="radio" name="rmode" value="before" checked> <span><b>Πριν το διαγώνισμα</b><br><small class="muted">παρόμοια θέματα: για κάθε θέση μια άλλη παραλλαγή, ίδιου τύπου με άλλα δεδομένα, ώστε οι σπουδαστές να μη δουν τα θέματα της εξέτασης</small></span></label>
+      <label class="chk"><input type="radio" name="rmode" value="after"> <span><b>Μετά το διαγώνισμα</b><br><small class="muted">τα ίδια τα θέματα του διαγωνίσματος με τις λύσεις τους, για συζήτηση στην τάξη</small></span></label></div>
+      <div class="row" style="margin-top:10px"><button type="button" class="btn" id="exrec">📊 Δημιουργία παρουσίασης</button></div></div></form>`);
   const showSel = el => {
     const s = $('select', el), it = byId[s.value];
     $('small', el).textContent = it ? it.label : '';
@@ -1369,10 +1374,7 @@ route(/^\/me\/exams(?:\/([a-z0-9_-]{1,40}))?$/, async (bid, tok) => {
     $$('.exslot').forEach(el => { $('select', el).value = np[el.dataset.p][+el.dataset.i]; showSel(el); });
   };
   const f = $('#exf'), E = n => f.elements.namedItem(n);
-  f.onsubmit = async e => {
-    e.preventDefault();
-    const btn = $('#exgo'); btn.disabled = true; btn.textContent = 'Δημιουργία…';
-    try {
+  const readForm = async () => {
       const fields = {}; ['SCHOOL', 'TITLE', 'PROGRAM', 'COURSE', 'TEACHER', 'DATE'].forEach(k => fields[k] = E(k).value.trim());
       try { localStorage.setItem(EXAM_PREFS, JSON.stringify({ SCHOOL: fields.SCHOOL, PROGRAM: fields.PROGRAM, TEACHER: fields.TEACHER })); } catch (er) { }
       const ids = { A: [], B: [] }; $$('.exslot').forEach(el => ids[el.dataset.p].push($('select', el).value));
@@ -1384,29 +1386,51 @@ route(/^\/me\/exams(?:\/([a-z0-9_-]{1,40}))?$/, async (bid, tok) => {
         logo = { data: new Uint8Array(await lf.arrayBuffer()), ext: /png$/i.test(lf.type) ? 'png' : 'jpeg', w: img.naturalWidth, h: img.naturalHeight };
         URL.revokeObjectURL(url);
       }
+      return { fields, ids, logo };
+  };
+  const fileBase = fields => (fields.COURSE || 'Διαγώνισμα').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_').slice(0, 60) + '_' + new Date().toISOString().slice(0, 10);
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const btn = $('#exgo'); btn.disabled = true; btn.textContent = 'Δημιουργία…';
+    try {
+      const { fields, ids, logo } = await readForm();
       const [tE, tS] = await Promise.all([examFile(bid, 'exam.docx'), examFile(bid, 'sol.docx')]);
-      const base = (fields.COURSE || 'Διαγώνισμα').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_').slice(0, 60);
-      const stamp = new Date().toISOString().slice(0, 10);
+      const base = fileBase(fields);
       const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
       for (const sol of [false, true]) {
         const zip = await ExamGen.build(JSZip, { template: sol ? tS : tE, bank, ids, sol, fields, logo });
-        saveBlob(await zip.generateAsync({ type: 'blob', mimeType: mime, compression: 'DEFLATE' }), `${base}_${stamp}${sol ? '_ΛΥΣΕΙΣ' : ''}.docx`);
+        saveBlob(await zip.generateAsync({ type: 'blob', mimeType: mime, compression: 'DEFLATE' }), `${base}${sol ? '_ΛΥΣΕΙΣ' : ''}.docx`);
         await new Promise(r => setTimeout(r, 400));
       }
       toast('Τα δύο αρχεία Word κατέβηκαν (διαγώνισμα και λύσεις).');
     } catch (er) { toast(errText(er), true); }
     finally { btn.disabled = false; btn.textContent = '📄 Δημιουργία διαγωνίσματος + λύσεων'; }
   };
+  $('#exrec').onclick = async () => {
+    const btn = $('#exrec'); btn.disabled = true; btn.textContent = 'Δημιουργία παρουσίασης…';
+    try {
+      const { fields, ids } = await readForm();
+      const mode = (f.querySelector('[name=rmode]:checked') || {}).value || 'before';
+      let recap, tpl;
+      try { [recap, tpl] = await Promise.all([examFile(bid, 'recap.json', 'json'), examFile(bid, 'recap.pptx')]); }
+      catch (er) { throw new Error('Η παρουσίαση ανακεφαλαίωσης δεν είναι ακόμη διαθέσιμη για αυτό το μάθημα.'); }
+      const zip = await ExamGen.buildRecap(JSZip, { template: tpl, recap, bank, ids, mode, fields });
+      saveBlob(await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', compression: 'DEFLATE' }),
+        `Ανακεφαλαίωση_${fileBase(fields)}${mode === 'after' ? '_λύσεις_διαγωνίσματος' : ''}.pptx`);
+      toast('Η παρουσίαση κατέβηκε.');
+    } catch (er) { toast(errText(er), true); }
+    finally { btn.disabled = false; btn.textContent = '📊 Δημιουργία παρουσίασης'; }
+  };
 });
 function bindExamUpload() {
   const go1 = $('#upgo'); if (!go1) return;
   go1.onclick = async () => {
     const bid = $('#upb').value, files = [...$('#upf').files];
-    const ok = files.filter(fl => ['bank.json', 'exam.docx', 'sol.docx'].includes(fl.name));
-    if (!ok.length) return toast('Επιλέξτε τα αρχεία bank.json, exam.docx, sol.docx.', true);
+    const ok = files.filter(fl => ['bank.json', 'exam.docx', 'sol.docx', 'recap.json', 'recap.pptx'].includes(fl.name));
+    if (!ok.length) return toast('Επιλέξτε τα αρχεία bank.json, exam.docx, sol.docx, recap.json, recap.pptx.', true);
     go1.disabled = true;
     try {
-      for (const fl of ok) await q(sb.storage.from('exam-bank').upload(bid + '/' + fl.name, fl, { upsert: true, contentType: fl.name.endsWith('.json') ? 'application/json' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
+      for (const fl of ok) await q(sb.storage.from('exam-bank').upload(bid + '/' + fl.name, fl, { upsert: true, contentType: fl.name.endsWith('.json') ? 'application/json' : fl.name.endsWith('.pptx') ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
       toast(`Ανέβηκαν ${ok.length} αρχεία στην τράπεζα «${bid}».`);
     } catch (er) { toast(errText(er), true); }
     finally { go1.disabled = false; }

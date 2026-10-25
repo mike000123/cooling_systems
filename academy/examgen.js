@@ -72,6 +72,79 @@
     return out;
   }
 
-  const api = { build, randomPick };
+
+  /* Παρουσίαση ανακεφαλαίωσης.
+     opts: {template, recap, bank, ids:{A,B}, mode:'before'|'after', fields, rnd} */
+  function recapItems(bank, recap, ids, mode, rnd) {
+    rnd = rnd || Math.random;
+    const used = new Set(ids.A.concat(ids.B)), out = [];
+    const byId = {}; bank.items.forEach(it => byId[it.id] = it);
+    for (const part of ['A', 'B']) ids[part].forEach((id, k) => {
+      const it = byId[id]; if (!it) return;
+      if (mode === 'after') { out.push({ id, part, n: k + 1 }); return; }
+      const c = bank.items.filter(x => x.part === part && x.pos === it.pos && !used.has(x.id) && recap.items[x.id]);
+      if (!c.length) return;
+      const pick = c[Math.floor(rnd() * c.length)]; used.add(pick.id);
+      out.push({ id: pick.id, part, n: k + 1 });
+    });
+    return out;
+  }
+  async function buildRecap(JSZip, opts) {
+    const zip = await JSZip.loadAsync(opts.template), R = opts.recap, F = Object.assign({}, opts.fields || {});
+    ['COURSE', 'SCHOOL', 'TEACHER'].forEach(k => F[k + '_UP'] = (F[k] || '').toLocaleUpperCase('el-GR').normalize('NFD').replace(/[̀-ͯ]/g, '').normalize('NFC'));
+    const list = recapItems(opts.bank, R, opts.ids, opts.mode, opts.rnd);
+    const bySlot = {}; list.forEach(x => { const s = R.items[x.id].per; (bySlot[s] = bySlot[s] || []).push(x); });
+    const PART = { A: 'ΜΕΡΟΣ Α΄', B: 'ΜΕΡΟΣ Β΄' };
+    const seq = [];   // {file} ή {xml, img}
+    for (const e of R.plan) {
+      if (e.f) { seq.push({ file: e.f }); continue; }
+      (bySlot[e.slot] || []).forEach(x => {
+        const it = R.items[x.id];
+        const head = opts.mode === 'after' ? `ΘΕΜΑ ΔΙΑΓΩΝΙΣΜΑΤΟΣ · ${PART[x.part]} · ΕΡΩΤΗΣΗ ${x.n}` : `ΘΕΜΑ ΤΥΠΟΥ ΕΞΕΤΑΣΗΣ · ${PART[x.part]}`;
+        const pern = e.slot === 'mix' ? String(Math.max(...R.plan.filter(z => /^p\d$/.test(z.slot || '')).map(z => +z.slot.slice(1)))) : e.slot.slice(1);
+        it.slides.forEach(s => seq.push({ xml: R.base.replace(/\{\{PERN\}\}/g, pern).replace('{{BODY}}', () => s.body).replace('{{TITLE}}', () => esc(it.title) + (s.cont ? ' (συνέχεια)' : ''))
+          .replace('{{KICK}}', () => (s.k === 's' ? 'ΛΥΣΗ · ' : '') + head), img: s.img }));
+      });
+    }
+    // presentation.xml / rels / content types
+    let pres = await zip.file('ppt/presentation.xml').async('string');
+    let prels = await zip.file('ppt/_rels/presentation.xml.rels').async('string');
+    let ct = await zip.file('[Content_Types].xml').async('string');
+    const t2rid = {}; prels.replace(/<Relationship\b[^>]*>/g, m => { const id = (m.match(/Id="([^"]+)"/) || [])[1], t = (m.match(/Target="([^"]+)"/) || [])[1]; if (t) t2rid['ppt/' + t] = id; return m; });
+    const oldIds = {}; (pres.match(/<p:sldId\b[^>]*\/>/g) || []).forEach(m => { const rid = m.match(/r:id="([^"]+)"/)[1]; oldIds[rid] = m.match(/\bid="(\d+)"/)[1]; });
+    let nid = 30000, g = 0, lst = '';
+    const N = seq.length;
+    for (let i = 0; i < N; i++) {
+      const s = seq[i], pg = `${i + 1} / ${N}`;
+      if (s.file) {
+        const rid = t2rid[s.file];
+        lst += `<p:sldId id="${oldIds[rid]}" r:id="${rid}"/>`;
+        zip.file(s.file, tok((await zip.file(s.file).async('string')), F, pg));
+      } else {
+        g++;
+        const name = `slideG${g}.xml`, rid = `rIdG${g}`;
+        zip.file('ppt/slides/' + name, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + tok(s.xml, F, pg));
+        const rel = `<Relationship Id="rIdL" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="${R.layout}"/>` +
+          s.img.map((m, k) => `<Relationship Id="rIdI${k + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${m}"/>`).join('');
+        zip.file('ppt/slides/_rels/' + name + '.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rel}</Relationships>`);
+        prels = prels.replace('</Relationships>', `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/${name}"/></Relationships>`);
+        ct = ct.replace('</Types>', `<Override PartName="/ppt/slides/${name}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`);
+        lst += `<p:sldId id="${nid++}" r:id="${rid}"/>`;
+      }
+    }
+    pres = pres.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, () => `<p:sldIdLst>${lst}</p:sldIdLst>`);
+    zip.file('ppt/presentation.xml', pres); zip.file('ppt/_rels/presentation.xml.rels', prels); zip.file('[Content_Types].xml', ct);
+    const usedImg = new Set(); seq.forEach(x => (x.img || []).forEach(m => usedImg.add(m)));
+    Object.keys(zip.files).filter(p => /^ppt\/media\/rb\d+\.\w+$/.test(p) && !usedImg.has(p.split('/').pop())).forEach(p => zip.remove(p));
+    for (const p of Object.keys(zip.files).filter(p => /^ppt\/notesSlides\/.*\.xml$|^docProps\/core\.xml$/.test(p)))
+      zip.file(p, tok(await zip.file(p).async('string'), F, ''));
+    return zip;
+  }
+  function tok(s, F, pg) {
+    const DOTS = { PROGRAM: '', TEACHER: '', SCHOOL: '', TEACHER_UP: '', SCHOOL_UP: '' };
+    return s.replace(/\{\{PG\}\}/g, pg).replace(/\{\{(\w+)\}\}/g, (m, k) => esc(F[k] != null && F[k] !== '' ? F[k] : (DOTS[k] != null ? DOTS[k] : '')));
+  }
+
+  const api = { build, randomPick, buildRecap, recapItems };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ExamGen = api;
 })(typeof window !== 'undefined' ? window : this);
