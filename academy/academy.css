@@ -413,4 +413,31 @@ body.viewing{overflow:hidden}
 .sthero .thtxt{width:auto;height:auto}
 .sthero .stimg{background-size:cover;background-position:center 30%;min-height:240px;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 22%);mask-image:linear-gradient(90deg,transparent 0,#000 22%)}
 @media (max-width:700px){.sthero{grid-template-columns:minmax(0,1fr)}.sthero .stimg{order:-1;min-height:170px;-webkit-mask-image:none;mask-image:none}.sthero .thtxt{background:none}}
+/* εγγραφή: τύπος λογαριασμού */
+.acctype{border:1px solid var(--line);border-radius:12px;padding:8px 12px 10px;margin:0;display:grid;gap:6px}
+.acctype legend{font-weight:700;padding:0 4px}
+#orgbox[hidden]{display:none}
+.accopts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.accopt{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer;font-weight:400;background:#fff}
+.accopt:has(input:checked){border-color:var(--orange);box-shadow:0 0 0 2px rgba(226,103,43,.15);background:#FFF8F1}
+.accopt input{margin-top:3px}.accopt b{display:block}.accopt small{color:var(--muted)}
+.regcard{transition:opacity .2s,box-shadow .2s;opacity:.72}.regcard.on{opacity:1;border-color:var(--orange);box-shadow:0 0 0 2px rgba(226,103,43,.12)}
+.regcard h2{margin:8px 0 6px;font-size:18px}
+.rlist{list-style:none;margin:0;padding:0!important;display:grid;gap:9px}.rlist li{display:flex;gap:10px;align-items:flex-start;margin:0!important}
+.rlist .ri{flex:none;width:30px;height:30px;border-radius:8px;background:var(--soft);display:flex;align-items:center;justify-content:center}
+@media (max-width:480px){.accopts{grid-template-columns:1fr}}
+
+.f label.accopt{display:flex;flex-direction:row;grid-template-columns:none}.accopt input[type=radio]{width:auto;flex:none;margin:3px 0 0}
+/* κωδικός τμήματος στον πίνακα σπουδαστή: εμφανές πλαίσιο */
+.joinbox.panel{margin-top:14px;padding:12px 16px;border-style:dashed}
+.joinbox.panel>summary{display:flex;gap:12px;align-items:center;cursor:pointer;list-style:none}
+.joinbox.panel>summary::-webkit-details-marker{display:none}
+.joinbox .jbi{flex:none;width:36px;height:36px;border-radius:10px;background:#FFF3E8;display:flex;align-items:center;justify-content:center;font-size:18px}
+.joinbox.panel[open]{border-style:solid;border-color:var(--orange)}
+/* πίνακας σπουδαστή: σταθερές καρτέλες (εργασίες · ανατροφοδότηση · μηνύματα · ανακοινώσεις) */
+.stpanels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}
+@media (max-width:640px){.stpanels{grid-template-columns:minmax(0,1fr)}.stpanel{min-height:0}}
+.stpanel{margin:0!important;display:flex;flex-direction:column;min-height:170px}
+.stpanel h2{font-size:16px;margin:0 0 8px}.stpanel .stbody{max-height:200px;overflow:auto}
+.resume.slim .rt{display:grid}.resume.slim{align-items:center}
 

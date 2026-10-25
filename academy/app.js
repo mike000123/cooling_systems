@@ -336,7 +336,7 @@ route(/^\/register$/, async () => {
   if (session) return go('#/');
   const pending = sessionStorage.getItem('csl-join');
   app.innerHTML = `<div class="hero"><div class="panel">
-    <h1>Εγγραφή</h1>
+    <h1>Δημιουργία λογαριασμού</h1><p class="muted" style="margin-top:-6px">Δωρεάν, σε ένα λεπτό. Διάλεξε αν μπαίνεις ως σπουδαστής ή ως εκπαιδευτής.</p>
     ${pending ? msgBox('info', `Μετά την εγγραφή θα αποκτήσετε πρόσβαση στην ενότητα με κωδικό <b>${esc(pending)}</b>.`) : ''}
     <form class="f" id="fm" novalidate>
       <label>Ονοματεπώνυμο<input type="text" name="name" autocomplete="name" maxlength="80" required>
@@ -344,27 +344,36 @@ route(/^\/register$/, async () => {
       <label>Email<input type="email" name="email" autocomplete="email" required></label>
       <label>Κωδικός<input type="password" name="password" autocomplete="new-password" minlength="8" required>
         <span class="hint">Τουλάχιστον 8 χαρακτήρες.</span></label>
+      <fieldset class="acctype"><legend>Τύπος λογαριασμού</legend>
+        <div class="accopts"><label class="accopt"><input type="radio" name="acct" value="student" checked><span><b>🎓 Σπουδαστής</b><small>παρακολουθώ μαθήματα</small></span></label>
+        <label class="accopt"><input type="radio" name="acct" value="teacher"><span><b>👩‍🏫 Εκπαιδευτής</b><small>διδάσκω με δικά μου τμήματα</small></span></label></div>
+        <div id="orgbox" hidden><label>Σχολή / οργανισμός (προαιρετικά)<input type="text" name="org" maxlength="200" placeholder="π.χ. Ιδιωτική σχολή ψυκτικών"></label>
+          <p class="muted small">Ο λογαριασμός εκπαιδευτή ενεργοποιείται μετά από έγκριση από τη διαχείριση της Academy (θα επικοινωνήσουμε μαζί σας για το πακέτο). Μέχρι τότε μπαίνετε κανονικά ως σπουδαστής.</p></div></fieldset>
       <label class="chk"><input type="checkbox" name="consent" required> <span>Διάβασα την <a href="privacy.html" target="_blank">πολιτική απορρήτου</a> και συμφωνώ με την επεξεργασία των στοιχείων μου για τη λειτουργία της Academy.</span></label>
       <p class="muted small">Η εγγραφή είναι δωρεάν και μπορείτε να διαγράψετε τον λογαριασμό σας όποτε θέλετε.</p>
       <div id="out"></div>
       <div><button class="btn accent" type="submit">Δημιουργία λογαριασμού</button></div>
     </form>
-  </div>${intro()}</div>`;
+  </div>${regIntro()}</div>`;
+  const syncAcc = () => { const v = $('input[name=acct]:checked').value; $('#orgbox').hidden = v !== 'teacher'; $$('.regcard').forEach(c => c.classList.toggle('on', c.dataset.for === v)); };
+  $$('input[name=acct]').forEach(x => x.onchange = syncAcc); syncAcc();
   $('#fm').onsubmit = async e => {
     e.preventDefault(); const f = e.target, out = $('#out');
     const name = f.elements.namedItem('name').value.trim(), email = f.email.value.trim(), pw = f.password.value;
+    const wantT = $('input[name=acct]:checked', f).value === 'teacher', org = f.elements.namedItem('org').value.trim();
     if (!name) return out.innerHTML = msgBox('err', 'Συμπληρώστε το ονοματεπώνυμο.');
     if (!/^\S+@\S+\.\S+$/.test(email)) return out.innerHTML = msgBox('err', 'Μη έγκυρο email.');
     if (pw.length < 8) return out.innerHTML = msgBox('err', 'Ο κωδικός θέλει τουλάχιστον 8 χαρακτήρες.');
     if (!f.consent.checked) return out.innerHTML = msgBox('err', 'Χρειάζεται η συγκατάθεσή σας στην πολιτική απορρήτου.');
     const b = $('button[type=submit]', f); b.disabled = true;
     const { data, error } = await sb.auth.signUp({ email, password: pw, options: {
-      data: { full_name: name, consent: 'true' }, emailRedirectTo: location.origin + location.pathname } });
+      data: Object.assign({ full_name: name, consent: 'true' }, wantT ? { teacher_request: 'true', org } : {}), emailRedirectTo: location.origin + location.pathname } });
     b.disabled = false;
     if (error) return out.innerHTML = msgBox('err', esc(errText(error)));
     if (!data.session) {
       app.innerHTML = `<div class="panel stack"><h1>Σχεδόν έτοιμοι!</h1>
         <p>Στείλαμε email επιβεβαίωσης στο <b>${esc(email)}</b>. Πατήστε τον σύνδεσμο που περιέχει και μετά συνδεθείτε.</p>
+        ${wantT ? '<p class="small">📨 Το αίτημά σας για λογαριασμό εκπαιδευτή καταχωρίστηκε. Θα ενεργοποιηθεί μετά την έγκρισή του· μέχρι τότε μπαίνετε ως σπουδαστής.</p>' : ''}
         <p class="muted small">Δεν το βλέπετε; Ελέγξτε τα ανεπιθύμητα (spam).</p><p><a class="btn" href="#/login">Σύνδεση</a></p></div>`;
     }
   };
@@ -437,6 +446,30 @@ function viewNewPassword() {
   };
 }
 
+// σελίδα εγγραφής: τι κερδίζει ο σπουδαστής και τι ο εκπαιδευτής (χωρίς αναφορά σε πακέτα)
+function regIntro() {
+  const li = (i, t, d) => `<li><span class="ri">${i}</span><span><b>${t}</b>${d ? `<br><span class="muted small">${d}</span>` : ''}</span></li>`;
+  return `<div class="stack regside">
+    <div class="panel regcard" data-for="student"><span class="pill ok">Για σπουδαστές · δωρεάν</span><h2>Μάθε ψύξη & κλιματισμό με τον δικό σου ρυθμό</h2>
+      <ul class="rlist">
+        ${li('🎓', 'Όλος ο κατάλογος μαθημάτων', 'Ψύξη & κλιματισμός και εγκαταστάσεις κτιρίων, σε 4 επίπεδα: Starter → Professional')}
+        ${li('🎬', 'Βίντεο, παρουσιάσεις και φύλλα εργασίας', 'ανασκόπηση κάθε μαθήματος σε βίντεο και υλικό για εξάσκηση')}
+        ${li('🔬', 'Διαδραστικές προσομοιώσεις', 'ψυκτικός κύκλος, μανόμετρα, ροή, πίεση… μέσα σε κάθε μάθημα')}
+        ${li('✅', 'Αυτοέλεγχος και πρόοδος', 'ερωτήσεις σε κάθε μάθημα, μπάρα προόδου και «Συνέχισε από εκεί που σταμάτησες»')}
+        ${li('🔔', 'Ειδοποίηση για νέα μαθήματα', 'πες μας τι σε ενδιαφέρει και θα σε ενημερώσουμε μόλις ανοίξει')}
+        ${li('🔑', 'Το τμήμα του εκπαιδευτή σου', 'μπες με τον κωδικό που σου δίνει και δες εργασίες, ανακοινώσεις και μηνύματα')}
+      </ul></div>
+    <div class="panel regcard" data-for="teacher"><span class="pill info">Για εκπαιδευτές</span><h2>Οργάνωσε τα μαθήματά σου σε ένα σημείο</h2>
+      <ul class="rlist">
+        ${li('🏫', 'Δικά σου ιδιωτικά τμήματα', 'οι σπουδαστές σου μπαίνουν με κωδικό· βλέπουν μόνο ό,τι τους δίνεις')}
+        ${li('📚', 'Έτοιμο υλικό της Academy', 'αντέγραψε έτοιμα μαθήματα με ένα κλικ και πρόσθεσε δικά σου βίντεο, αρχεία και προσομοιώσεις')}
+        ${li('📝', 'Εργασίες, βαθμολόγηση και ανατροφοδότηση', 'υποβολές online, βαθμολόγιο για Excel')}
+        ${li('💬', 'Ανακοινώσεις και μηνύματα', 'επικοινωνία με το τμήμα ή με κάθε σπουδαστή χωριστά')}
+        ${li('📊', 'Πρόοδος και στατιστικά', 'ποιος ολοκλήρωσε τι, ποια αρχεία και βίντεο άνοιξε')}
+        ${li('🧾', 'Τράπεζα θεμάτων εξετάσεων <span class="pill warn">σύντομα</span>', 'έτοιμα διαγωνίσματα σε Word με τις λύσεις τους, με επιλογή θεμάτων ή τυχαία')}
+      </ul>
+      <p class="muted small" style="margin:6px 0 0">Ο λογαριασμός εκπαιδευτή ενεργοποιείται μετά από σύντομη έγκριση· μέχρι τότε μπαίνεις κανονικά ως σπουδαστής.</p></div></div>`;
+}
 function intro() {
   return `<div class="panel stack"><h2>Τι είναι η Academy</h2>
     <p>Μαθησιακό υλικό για βασικά και προχωρημένα θέματα ψύξης και κλιματισμού, οργανωμένο σε ενότητες:</p>
@@ -465,11 +498,15 @@ route(/^\/(?:profile|me\/settings)$/, async () => {
   app.innerHTML = meLayout('set', `<h1 style="margin-top:0">Ρυθμίσεις</h1><div class="two"><div class="stack">
     <div class="panel"><h2>Στοιχεία</h2><form class="f" id="fn">
       <label>Ονοματεπώνυμο<input type="text" name="name" maxlength="80" value="${esc(me.full_name)}" required></label>
-      <p class="muted small">Email: ${esc(me.email)} · Ρόλος: ${isTeacher() ? 'Διαχειριστής' : 'Χρήστης'} · Μέλος από ${fmtDay(me.created_at)}</p>
+      <p class="muted small">Email: ${esc(me.email)} · Ρόλος: ${esc(ROLE_NAME[me.role] || 'Χρήστης')} · Μέλος από ${fmtDay(me.created_at)}</p>
       <div class="row"><button class="btn primary">Αποθήκευση</button><span class="spacer"></span><button type="button" class="btn" id="logout">Αποσύνδεση</button></div></form></div>
     <div class="panel"><h2>Αλλαγή κωδικού</h2><form class="f" id="fp">
       <label>Νέος κωδικός<input type="password" name="pw" minlength="8" autocomplete="new-password" required></label>
       <div><button class="btn">Αλλαγή</button></div></form></div>
+    ${!isTeacher() ? `<div class="panel"><h2>Λογαριασμός εκπαιδευτή</h2>${me.teacher_request_at
+      ? `<p class="small">📨 Έχετε ζητήσει λογαριασμό εκπαιδευτή (${fmtDay(me.teacher_request_at)}). Θα ενεργοποιηθεί μετά την έγκριση.</p><div><button type="button" class="btn small" id="treqx">Ακύρωση αιτήματος</button></div>`
+      : `<form class="f" id="treq"><p class="small">Είστε εκπαιδευτής και θέλετε δικά σας τμήματα με τους σπουδαστές σας; Στείλτε αίτημα· ενεργοποιείται μετά από έγκριση.</p>
+        <label>Σχολή / οργανισμός (προαιρετικά)<input type="text" name="org" maxlength="200"></label><div><button class="btn">Αίτημα λογαριασμού εκπαιδευτή</button></div></form>`}</div>` : ''}
   </div><div class="stack">
     <div class="panel stack"><h2>Τα δεδομένα μου</h2>
       <p class="small">Μπορείτε να κατεβάσετε όλα όσα έχουμε αποθηκεύσει για εσάς ή να διαγράψετε οριστικά τον λογαριασμό σας. <a href="privacy.html" target="_blank">Πολιτική απορρήτου</a></p>
@@ -479,6 +516,14 @@ route(/^\/(?:profile|me\/settings)$/, async () => {
       <div><button class="btn danger" id="del">Διαγραφή λογαριασμού</button></div><div id="dout"></div>
     </div></div></div>`);
   $('#logout').onclick = () => sb.auth.signOut();
+  if ($('#treq')) $('#treq').onsubmit = async e => {
+    e.preventDefault();
+    try { await q(sb.rpc('request_teacher', { note: e.target.elements.namedItem('org').value })); await loadMe(); toast('Το αίτημα στάλθηκε.'); render(); }
+    catch (er) { toast(/request_teacher/.test(String(er && er.message)) ? 'Η λειτουργία δεν είναι ακόμη ενεργή.' : errText(er), true); }
+  };
+  if ($('#treqx')) $('#treqx').onclick = async () => {
+    try { await q(sb.rpc('cancel_teacher_request')); await loadMe(); toast('Το αίτημα ακυρώθηκε.'); render(); } catch (er) { toast(errText(er), true); }
+  };
   $('#fn').onsubmit = async e => {
     e.preventDefault(); const n = e.target.elements.namedItem('name').value.trim(); if (!n) return;
     try { await q(sb.from('profiles').update({ full_name: n }).eq('id', me.id)); me.full_name = n; renderNav(location.hash.replace(/^#/, '')); toast('Αποθηκεύτηκε.'); }
@@ -933,29 +978,27 @@ async function studentHome(tok) {
     featAny('assignments') ? q(sb.from('assignments').select('id,title,due_at,class_id,allow_late,classes(name)').order('due_at', { ascending: true, nullsFirst: false })) : none(),
     featAny('assignments') ? q(sb.from('submissions').select('assignment_id,status,points,graded_at,feedback,assignments(title,max_points,class_id)').eq('student_id', me.id)) : none(),
     featAny('announcements') ? q(sb.from('announcements').select('id,title,created_at,class_id,classes(name)').order('created_at', { ascending: false }).limit(5)) : none()]);
-  const unreadHTML = await unreadPanel();
   const catHTML = await catalogPanel({ view: 'mine', mine: D.mine, access: D.acc, prog: D.prog, extra: D.extra });
   if (stale(tok)) return;
-  const R = D.resume, resume = R ? `<a class="resume" href="${R.href}"><div class="rt"><small>Συνέχισε από εκεί που σταμάτησες</small><b>${esc(R.cname)} — ${esc(R.title)}</b>${progressBar(R.d, R.t, 'Η πρόοδός σου')}</div><span class="btn accent">Συνέχισε →</span></a>` : '';
+  const R = D.resume, resume = R ? `<a class="resume slim" href="${R.href}"><span class="rt"><small>Συνέχισε από εκεί που σταμάτησες</small><b>${esc(R.cname)} — ${esc(R.title)}</b></span><span class="btn accent small">Συνέχισε →</span></a>` : '';
   const done = new Set(subs.map(s => s.assignment_id));
   const todo = asgs.filter(a => !done.has(a.id));
   const graded = subs.filter(s => s.status === 'returned').sort((a, b) => new Date(b.graded_at) - new Date(a.graded_at)).slice(0, 5);
+  // σταθερές καρτέλες με σταθερή σειρά (δεν αλλάζουν θέση): Εκκρεμείς εργασίες · Ανατροφοδότηση · Μηνύματα · Ανακοινώσεις
+  const box = (ico, title, body, n) => `<div class="panel stpanel"><h2>${ico} ${title}${n ? ` <span class="badge">${n}</span>` : ''}</h2><div class="stbody">${body}</div></div>`;
+  const msgs = featAny('messages') ? await q(sb.from('messages').select('class_id,created_at,classes(name)').is('read_at', null).neq('sender_id', me.id).order('created_at', { ascending: false })).catch(() => []) : [];
+  const mg = new Map(); msgs.forEach(m => { if (!mg.has(m.class_id)) mg.set(m.class_id, { ...m, n: 0 }); mg.get(m.class_id).n++; });
   const panels = [
-    featAny('assignments') ? `<div class="panel"><h2>Εκκρεμείς εργασίες</h2>
-      ${todo.length ? `<ul class="list">${todo.map(a => `<li><a class="item" href="#/c/${a.class_id}/asg/${a.id}"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')}</span></span>${duePill(a)}</a></li>`).join('')}</ul>` : `<p class="muted">Καμία εκκρεμότητα.</p>`}
-    </div>` : '',
-    unreadHTML,
-    featAny('assignments') ? `<div class="panel"><h2>Ανατροφοδότηση</h2>
-      ${graded.length ? `<ul class="list">${graded.map(s => `<li><a class="item" href="#/c/${s.assignments.class_id}/asg/${s.assignment_id}"><span class="spacer">${esc(s.assignments.title)}</span><span class="pill ok">${s.points != null ? num(s.points) + '/' + num(s.assignments.max_points) : 'Σχόλια'}</span></a></li>`).join('')}</ul>` : `<p class="muted small">Δεν υπάρχει ακόμη.</p>`}
-    </div>` : '',
-    featAny('announcements') ? `<div class="panel"><h2>Ανακοινώσεις</h2>
-      ${anns.length ? `<ul class="list">${anns.map(a => `<li><a class="item" href="#/c/${a.class_id}/ann"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')} · ${fmtDay(a.created_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Καμία ανακοίνωση.</p>`}
-    </div>` : ''].filter(Boolean);
-  app.innerHTML = meLayout('dash', `${pvBanner()}${studentHero()}
+    featAny('assignments') ? box('📝', 'Εκκρεμείς εργασίες', todo.length ? `<ul class="list">${todo.map(a => `<li><a class="item" href="#/c/${a.class_id}/asg/${a.id}"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')}</span></span>${duePill(a)}</a></li>`).join('')}</ul>` : `<p class="muted small">Καμία εκκρεμότητα.</p>`, todo.length) : '',
+    featAny('assignments') ? box('✅', 'Ανατροφοδότηση', graded.length ? `<ul class="list">${graded.map(s => `<li><a class="item" href="#/c/${s.assignments.class_id}/asg/${s.assignment_id}"><span class="spacer">${esc(s.assignments.title)}</span><span class="pill ok">${s.points != null ? num(s.points) + '/' + num(s.assignments.max_points) : 'Σχόλια'}</span></a></li>`).join('')}</ul>` : `<p class="muted small">Δεν υπάρχει ακόμη.</p>`) : '',
+    featAny('messages') ? box('💬', 'Μηνύματα', mg.size ? `<ul class="list">${[...mg.values()].map(m => `<li><a class="item" href="#/c/${m.class_id}/chat"><span class="spacer"><b>Από τον εκπαιδευτή</b><br><span class="muted small">${esc(m.classes?.name || '')} · ${fmtDay(m.created_at)}</span></span><span class="badge">${m.n}</span></a></li>`).join('')}</ul>` : `<p class="muted small">Κανένα νέο μήνυμα. Τα μηνύματα με τον εκπαιδευτή σου είναι μέσα σε κάθε τμήμα.</p>`, msgs.length) : '',
+    featAny('announcements') ? box('📣', 'Ανακοινώσεις', anns.length ? `<ul class="list">${anns.map(a => `<li><a class="item" href="#/c/${a.class_id}/ann"><span class="spacer"><b>${esc(a.title)}</b><br><span class="muted small">${esc(a.classes?.name || '')} · ${fmtDay(a.created_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Καμία ανακοίνωση.</p>`) : ''].filter(Boolean);
+  const reqHTML = me.teacher_request_at && !homePreview() ? msgBox('info', `📨 <b>Το αίτημά σου για λογαριασμό εκπαιδευτή έχει σταλεί</b> (${fmtDay(me.teacher_request_at)}). Μόλις εγκριθεί, εδώ θα εμφανιστεί ο πίνακας καθηγητή. Μέχρι τότε χρησιμοποιείς την Academy ως σπουδαστής.`) + '<div style="height:12px"></div>' : '';
+  app.innerHTML = meLayout('dash', `${pvBanner()}${reqHTML}${studentHero()}
   ${resume}
-  ${panels.length ? `<div class="${panels.length > 1 ? 'two' : ''}">${panels.join('')}</div>` : ''}
+  ${panels.length ? `<div class="stpanels">${panels.join('')}</div>` : ''}
   ${catHTML}
-  <details id="joinbox" class="joinbox"><summary class="muted small">Έχεις κωδικό τμήματος από τον εκπαιδευτή σου;</summary>
+  <details id="joinbox" class="joinbox panel"><summary><span class="jbi">🔑</span><span><b>Έχεις κωδικό τμήματος από τον εκπαιδευτή σου;</b><br><span class="muted small">Πάτα εδώ και γράψε τον κωδικό για να μπεις στο τμήμα του.</span></span></summary>
     <form class="row" id="join" style="margin-top:8px"><input class="inp" name="code" placeholder="Κωδικός ενότητας" maxlength="12" style="max-width:220px;text-transform:uppercase" required><button class="btn">Είσοδος</button></form></details>`);
   if (catHTML) bindCatalog();
   try { if (sessionStorage.getItem('csl-openjoin')) { sessionStorage.removeItem('csl-openjoin'); const d = $('#joinbox'); d.open = true; d.scrollIntoView({ block: 'center' }); d.querySelector('input').focus(); } } catch (e) { }
@@ -1009,7 +1052,9 @@ async function teacherHome(tok) {
       <div class="ccact"><a class="btn accent small" href="#/c/${esc(k.id)}">Μαθήματα →</a><button class="btn small newl" data-c="${esc(k.id)}">+ Νέο μάθημα</button></div></div>`).join('')}</div></div>` : '';
   const nDecl = Object.values(counts).reduce((a, b) => a + b, 0), nDC = Object.keys(counts).length, k = ov && ov.kpi;
   const tiles = `<div class="tiles sm">${k ? tile(k.users, 'χρήστες', `+${k.new7} σε 7 μέρες`) + tile(k.active7, 'ενεργοί (7 ημέρες)') : ''}${tile(nDecl, 'δηλώσεις 🔔', nDC ? `σε ${nDC} μαθήματα` : '')}${featAny('assignments') ? tile(pend.length, 'προς βαθμολόγηση') : (k ? tile(k.completions, 'ολοκληρώσεις μαθημάτων') : '')}</div>`;
-  const panels = [unreadHTML, featAny('assignments') ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
+  const rqN = isAdmin() ? await sb.rpc('admin_teacher_requests').then(r => r.error ? 0 : (r.data || []).length, () => 0) : 0;
+  const rqHTML = rqN ? `<a class="panel" href="#/me/teachers" style="display:block;border-color:var(--orange);text-decoration:none;color:inherit"><b>📨 ${rqN} ${rqN === 1 ? 'αίτημα' : 'αιτήματα'} για λογαριασμό εκπαιδευτή</b><br><span class="muted small">Έγκριση ή απόρριψη στο 👥 Εκπαιδευτές →</span></a>` : '';
+  const panels = [rqHTML, unreadHTML, featAny('assignments') ? `<div class="panel"><h2>Προς βαθμολόγηση</h2>
     ${pend.length ? `<ul class="list">${pend.slice(0, 12).map(p => `<li><a class="item" href="#/c/${p.assignments.class_id}/asg/${p.assignment_id}/grade/${p.id}"><span class="spacer"><b>${esc(p.profiles?.full_name || '')}</b><br><span class="muted small">${esc(p.assignments.title)} · ${fmtDay(p.submitted_at)}</span></span></a></li>`).join('')}</ul>` : `<p class="muted small">Όλα βαθμολογημένα.</p>`}
   </div>` : ''].filter(Boolean);
   const acts = `<div class="tacts"><button class="btn" id="prev-home">👁 Προβολή ως χρήστης</button>${isAdmin() ? '<a class="btn accent" href="#/new-class" title="Για κλειστά τμήματα ή υλικό που δεν ανήκει σε κάρτα του καταλόγου">+ Ενότητα εκτός καταλόγου</a>' : ''}</div>`;
@@ -1074,8 +1119,9 @@ const needUpd15 = (where, title) => { app.innerHTML = meLayout(where, `<h1 style
 route(/^\/me\/teachers$/, async tok => {
   if (needLogin()) return;
   if (!isAdmin()) return go('#/me');
-  let T, P;
-  try { [T, P] = await Promise.all([q(sb.rpc('admin_teachers')), q(sb.from('plans').select('*').order('sort').order('name'))]); }
+  let T, P, RQ;
+  try { [T, P, RQ] = await Promise.all([q(sb.rpc('admin_teachers')), q(sb.from('plans').select('*').order('sort').order('name')),
+    sb.rpc('admin_teacher_requests').then(r => r.error ? null : (r.data || []), () => null)]); }
   catch (er) { return needUpd15('teach', '👥 Εκπαιδευτές'); }
   if (stale(tok)) return;
   const pName = id => (P.find(p => p.id === id) || {}).name || id;
@@ -1091,12 +1137,24 @@ route(/^\/me\/teachers$/, async tok => {
     return `<tr data-s="${esc((t.full_name + ' ' + t.email).toLowerCase())}"><td><b>${esc(t.full_name)}</b><br><span class="muted small">${me0 ? 'εσείς' : esc(t.email)}</span></td><td>${roleP(t.role)}</td><td>${pk}</td><td>${use}</td><td>${crs}</td>
       <td>${me0 ? '' : `<button class="btn small" data-ed="${esc(t.id)}" title="Επεξεργασία">✎</button>`}</td></tr>`;
   };
-  app.innerHTML = meLayout('teach', `<div class="row between"><h1 style="margin-top:0">👥 Εκπαιδευτές</h1><button class="btn primary" id="tnew">＋ Νέος εκπαιδευτής</button></div>
+  const reqHTML = RQ === null ? msgBox('info', 'Για τα αιτήματα εκπαιδευτών από την εγγραφή, τρέξτε το <code>update_16_teacher_signup.sql</code> στο Supabase.') + '<div style="height:12px"></div>'
+    : RQ.length ? `<div class="panel" style="border-color:var(--orange)"><h2 style="margin-top:0">📨 Αιτήματα για λογαριασμό εκπαιδευτή (${RQ.length})</h2>
+      <div class="tablewrap"><table class="t"><thead><tr><th>Όνομα</th><th>Email</th><th>Σχολή / οργανισμός</th><th>Αίτημα</th><th></th></tr></thead><tbody>
+      ${RQ.map(r => `<tr><td><b>${esc(r.full_name)}</b></td><td class="muted">${esc(r.email)}</td><td>${esc(r.note || '—')}</td><td>${fmtDay(r.teacher_request_at)}</td>
+        <td style="white-space:nowrap"><button class="btn small primary" data-ok="${esc(r.id)}">Έγκριση…</button> <button class="btn small danger" data-no="${esc(r.id)}">Απόρριψη</button></td></tr>`).join('')}</tbody></table></div>
+      <p class="muted small" style="margin:8px 0 0">«Έγκριση…» ανοίγει τα στοιχεία του λογαριασμού: διαλέγετε ρόλο, πακέτο και λήξη. Μέχρι τότε ο χρήστης έχει πρόσβαση μόνο ως σπουδαστής.</p></div>` : '';
+  app.innerHTML = meLayout('teach', `<div class="row between"><h1 style="margin-top:0">👥 Εκπαιδευτές</h1><button class="btn primary" id="tnew">＋ Νέος εκπαιδευτής</button></div>${reqHTML}
     <div class="tiles">${tile(nStaff, 'Εκπαιδευτές Academy', 'εμπλουτίζουν τον κατάλογο')}${tile(ext.length, 'Εξωτερικοί', Object.entries(byPlan).map(([n, c]) => `${c} ${esc(n)}`).join(' · ') || '—')}
       ${tile(soon.length, 'Λήγουν σε 30 μέρες', soon.map(t => esc(t.full_name)).join(', '))}${tile(expired.length, 'Έληξαν', expired.length ? 'τα τμήματά τους είναι μόνο για ανάγνωση' : '')}</div>
     <div class="panel"><div class="row between"><h2 style="margin:0">Λογαριασμοί εκπαιδευτών</h2><input class="inp" id="tq" placeholder="Αναζήτηση ονόματος ή email" style="max-width:260px"></div>
     <div class="tablewrap" style="margin-top:10px"><table class="t"><thead><tr><th>Όνομα</th><th>Ρόλος</th><th>Πακέτο · λήξη</th><th>Χρήση</th><th>Μαθήματα καταλόγου</th><th></th></tr></thead><tbody id="tb">${T.map(row).join('')}</tbody></table></div>
     <p class="muted small">Ο ρόλος και το πακέτο αλλάζουν μόνο από εδώ (μόνο ο Διαχειριστής βλέπει αυτή τη σελίδα). Τα όρια ελέγχονται στη βάση, άρα δεν παρακάμπτονται. Νέος εκπαιδευτής = ένας χρήστης που έχει ήδη κάνει εγγραφή στην Academy.</p></div>`);
+  $$('[data-ok]').forEach(b => b.onclick = () => { const r = RQ.find(x => x.id === b.dataset.ok); const d = new Date(); d.setMonth(d.getMonth() + 1);
+    teacherModal({ ...r, role: 'external', plan_id: (P[0] || {}).id || null, valid_until: d.toISOString().slice(0, 10), extra_classes: 0, extra_students: 0, payment_note: r.note ? 'Σχολή: ' + r.note : '', courses: [], _new: true }, P); });
+  $$('[data-no]').forEach(b => b.onclick = async () => {
+    const r = RQ.find(x => x.id === b.dataset.no); if (!confirm(`Απόρριψη του αιτήματος του/της «${r.full_name}»; Ο λογαριασμός μένει ως σπουδαστής.`)) return;
+    try { await q(sb.rpc('admin_reject_request', { uid: r.id })); toast('Το αίτημα απορρίφθηκε.'); render(); } catch (er) { toast(errText(er), true); }
+  });
   $('#tq').oninput = e => { const v = e.target.value.trim().toLowerCase(); $$('#tb tr').forEach(r => r.hidden = !!v && !r.dataset.s.includes(v)); };
   $$('[data-ed]').forEach(b => b.onclick = () => teacherModal(T.find(t => t.id === b.dataset.ed), P));
   $('#tnew').onclick = async () => {
