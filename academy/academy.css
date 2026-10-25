@@ -441,3 +441,11 @@ body.viewing{overflow:hidden}
 .stpanel h2{font-size:16px;margin:0 0 8px}.stpanel .stbody{max-height:200px;overflow:auto}
 .resume.slim .rt{display:grid}.resume.slim{align-items:center}
 
+/* τράπεζα θεμάτων */
+a.plan.exbank{color:inherit;text-decoration:none}a.plan.exbank:hover{border-color:var(--orange)}
+.exslots{display:grid;gap:8px}
+.exslot{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:start;padding:8px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.exslot.dup{border-color:#d33;background:#fff5f5}
+.exslot .exn{font-weight:800;color:var(--navy);text-align:center;padding-top:6px}
+.exsel{display:grid;gap:4px;min-width:0}.exsel select{width:100%}.exsel small{line-height:1.35}
+@media (max-width:640px){.kv{grid-template-columns:1fr}.exslot{grid-template-columns:24px minmax(0,1fr) auto}}
